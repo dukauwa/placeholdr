@@ -1,60 +1,126 @@
-**What is Placeholdr?**
+# dreamlog
 
-PlaceHoldr is a simple to use [http://laravel.com](Laravel) bundle that helps web designers create place holder images on the fly. There are certain times you need to use an image on a web site but you want to not be bothered with any graphic design at the moment, but you do need an image to hang on that empty space, well, that's where PlaceHoldr comes in handy.
+An agent that reads your personal notes while you sleep and returns, come morning, with one small thread it found between them — a hypothesis, a question, or a strange connection.
 
-PlaceHoldr simply creates an image of any width and height combination on the fly. You can then use this generated image for whatever placeholding purposes you need it for.
+Stack: Next.js 15 (App Router) · TypeScript · Tailwind · MongoDB Atlas Vector Search · Anthropic Claude Sonnet 4.6 · OpenAI `text-embedding-3-small`.
 
-**Placeholdr Installation**
+## How it works
 
-***Manual Installation***
+1. **Ingest.** You paste text on `/`. It gets chunked to ~300 tokens, embedded with OpenAI, and stored in `memories`.
+2. **Dream.** `POST /api/dream` (designed as a nightly cron) samples 25 memories, and for each one runs a vector search and picks 2–3 neighbors from a *mid-similarity band* — related enough to matter, distant enough to surprise. Each cluster is handed to Claude, which returns a hypothesis, question, or connection via tool-use.
+3. **Read.** `/dreams` is the morning letter — editorial, serif, with collapsible citations back to the source fragments.
 
-You can download the .zip file from here on github, and drop the Placeholdr directory in your bundles directory.
+## Setup
 
-***Using The Artisan CLI***
+### 1. Install
 
-You can install the bundle using the Laravel Artisan CLI by running:
+```bash
+pnpm install   # or npm install / yarn
+```
 
-<code>
-	$ php artisan bundle install placeholdr
-</code>
+### 2. MongoDB Atlas
 
-***Activating PlaceHoldr***
+- Create a free Atlas cluster and a database called `dreamlog` (or match `MONGODB_DB`).
+- Get a connection string for a user with read/write on that DB.
+- **Create the vector search index.** In Atlas → *Search* → *Create Search Index* → *JSON Editor* → *Vector Search* on the `memories` collection. Name it **`memories_vector`** and use:
 
-After installing placeholdr either manually or via artisan, you can then activate it by adding the following code to your applications bundle.php bundles list:
+  ```json
+  {
+    "fields": [
+      { "type": "vector", "path": "embedding", "numDimensions": 1536, "similarity": "cosine" },
+      { "type": "filter", "path": "userId" }
+    ]
+  }
+  ```
 
-<code>
-	return array
-	(
-		'placeholdr' => array(
-			'handles' => 'placeholdr',
-		),
-	);
-</code>
+  The index needs a few minutes to build before dreams will generate.
 
-**Placeholdr Usage**
+### 3. Environment
 
-After installation, using Placeholdr couldnt be easier. All you have to do is follow the instructions below:
+Copy `.env.example` to `.env.local` and fill in:
 
-***Verifying Installation***
+| Var | What |
+| --- | --- |
+| `MONGODB_URI` | Atlas connection string |
+| `MONGODB_DB` | Database name (default `dreamlog`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `ANTHROPIC_MODEL` | Defaults to `claude-sonnet-4-6` |
+| `OPENAI_API_KEY` | OpenAI API key (for embeddings) |
+| `EMBEDDING_MODEL` | Defaults to `text-embedding-3-small` |
+| `DREAM_TRIGGER_SECRET` | Long random string; guards `/api/dream` |
+| `DEFAULT_USER_ID` | e.g. `demo-user` — v1 is single-user |
 
-To verify that you have successfully installed and activated PlaceHoldr into your Laravel installation, point your web browser to http://yourlaravel.url/placeholdr/, you should see a nice splash screen that tells and shows you how to use PlaceHoldr.
+### 4. Seed
 
-***Within Laravel, Installed As A Bundle***
+```bash
+pnpm seed
+```
 
-If you are using PlaceHoldr as a bundle then you can easily add placeholdr images in your laravel views by using the following code:
+This loads 41 varied memories (journal fragments, overheards, half-finished ideas, travel notes, etc.) so the dreaming loop has interesting material to cross.
 
-<code>
-	// In your blade templates
-	{{ HTML::placeholdr('300x300', 'Optional Text') }}
+### 5. Run
 
-	// In your non-blade templates
-	<?php echo HTML::placeholdr('300x300', 'Optional Text') ?>
-</code>
+```bash
+pnpm dev
+```
 
-***Outside Laravel Installation***
+Open `http://localhost:3000`, paste something, then in another shell:
 
-Creating PlaceHoldrs externally is also pretty straight forward. All you have to do is use a normal HTML img tag and link directly to the PlaceHoldr URL, specifying the width, height and image text (latter both optional).
+```bash
+pnpm dream:local
+```
 
-<code>
-	&ltimg src="http://url.to/placeholdr/300x300/Optional+Text" alt="" />
-</code>
+Then visit `http://localhost:3000/dreams`.
+
+## Deployment
+
+Deploy to Vercel. Add all env vars. `vercel.json` already registers a cron:
+
+```json
+{ "crons": [{ "path": "/api/dream", "schedule": "0 7 * * *" }] }
+```
+
+Vercel Cron sends a GET with an `x-vercel-cron` header, which `/api/dream` accepts in place of the bearer token. For manual triggers against the deployment, POST with `Authorization: Bearer $DREAM_TRIGGER_SECRET`.
+
+## Tuning the dreaming
+
+If the dreams feel too obvious (restatements of the source notes), tighten the band in `lib/dream.ts`:
+
+- Raise `SKIP_TOP_RANKS` (currently 4).
+- Narrow `MIN_SCORE` / `MAX_SCORE` toward 0.40–0.55.
+
+If the dreams feel random / disconnected, widen the band:
+
+- Lower `SKIP_TOP_RANKS`.
+- Widen toward 0.30–0.70.
+
+`DREAM_BUDGET` caps Claude calls per cycle (default 12).
+
+## File map
+
+```
+app/
+  layout.tsx              header/footer, fonts, dark shell
+  page.tsx                home = ingest
+  dreams/page.tsx         the morning letter
+  api/ingest/route.ts     chunk + embed + insert
+  api/dream/route.ts      bearer-auth trigger for the dream cycle
+lib/
+  dream.ts                core sampling + clustering + generation
+  prompts.ts              system prompt + tool schema
+  chunk.ts                tiktoken-based chunker
+  embed.ts                batched OpenAI embeddings
+  mongo.ts                cached client + collection helpers
+  anthropic.ts · openai.ts · types.ts
+components/
+  IngestForm.tsx  DreamCard.tsx  CitationList.tsx  FadeIn.tsx
+scripts/
+  seed.ts                 41 varied seed memories
+```
+
+## Notes & limitations
+
+- Single-user demo: no auth, `DEFAULT_USER_ID` is used everywhere.
+- Paste-only ingestion for v1 (no file upload, no PDF).
+- Dedup window is 7 days on `(seedMemoryId, citationIds)`.
+- The model is chosen via `ANTHROPIC_MODEL` — swap to `claude-opus-4-7` for higher-quality prose at ~3–5× cost.
