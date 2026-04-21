@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { chunkText } from '@/lib/chunk';
 import { embedTexts } from '@/lib/embed';
 import { memoriesCollection } from '@/lib/mongo';
+import { DEMO_MODE } from '@/lib/demo';
 import type { Memory } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -29,6 +30,14 @@ export async function POST(req: Request) {
   const chunks = chunkText(parsed.content);
   if (chunks.length === 0) {
     return NextResponse.json({ error: 'No content to ingest' }, { status: 400 });
+  }
+
+  if (DEMO_MODE) {
+    return NextResponse.json({
+      inserted: chunks.length,
+      tokenCount: chunks.reduce((s, c) => s + c.tokenCount, 0),
+      demo: true,
+    });
   }
 
   const embeddings = await embedTexts(chunks.map((c) => c.content));

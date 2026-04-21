@@ -49,6 +49,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `EMBEDDING_MODEL` | Defaults to `text-embedding-3-small` |
 | `DREAM_TRIGGER_SECRET` | Long random string; guards `/api/dream` |
 | `DEFAULT_USER_ID` | e.g. `demo-user` — v1 is single-user |
+| `DEMO_MODE` | Set to `1` to run the UI without Atlas/OpenAI/Anthropic (uses in-memory sample dreams) |
 
 ### 4. Seed
 
@@ -71,6 +72,16 @@ pnpm dream:local
 ```
 
 Then visit `http://localhost:3000/dreams`.
+
+## Demo mode
+
+To click through the UI without setting up Atlas/OpenAI/Anthropic, run:
+
+```bash
+DEMO_MODE=1 DEFAULT_USER_ID=demo-user pnpm dev
+```
+
+`/dreams` will render three pre-baked sample dreams with citations, and the ingest form will simulate a successful save. Useful for testing the UI, reviewing the design, or checking mobile responsiveness.
 
 ## Deployment
 

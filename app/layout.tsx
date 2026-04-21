@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Instrument_Serif } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
@@ -23,6 +23,12 @@ export const metadata: Metadata = {
   description: 'An agent that dreams from your notes.',
 };
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#0b0b0d',
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -31,7 +37,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${sans.variable} ${serif.variable}`}>
       <body className="min-h-screen bg-ink-bg text-ink-text antialiased">
-        <header className="mx-auto max-w-reading px-6 pt-10 pb-16">
+        <header className="mx-auto max-w-reading px-5 pt-8 pb-12 sm:px-6 sm:pt-10 sm:pb-16">
           <nav className="flex items-baseline justify-between text-sm">
             <Link
               href="/"
@@ -39,7 +45,7 @@ export default function RootLayout({
             >
               dreamlog
             </Link>
-            <div className="flex gap-6 font-sans text-ink-muted">
+            <div className="flex gap-4 sm:gap-6 font-sans text-ink-muted">
               <Link href="/" className="hover:text-ink-text transition-colors">
                 ingest
               </Link>
@@ -50,7 +56,7 @@ export default function RootLayout({
           </nav>
         </header>
         <main>{children}</main>
-        <footer className="mx-auto max-w-reading px-6 py-16 text-xs font-sans text-ink-muted">
+        <footer className="mx-auto max-w-reading px-5 py-12 sm:px-6 sm:py-16 text-xs font-sans text-ink-muted">
           <span className="font-serif italic">dreamt nightly.</span>
         </footer>
       </body>

@@ -45,11 +45,11 @@ export function IngestForm() {
           setContent(e.target.value);
           if (status.kind !== 'idle') setStatus({ kind: 'idle' });
         }}
-        rows={12}
+        rows={10}
         placeholder="paste a journal entry, a handful of notes, an overheard line, half a thought..."
-        className="w-full resize-y rounded-sm border border-ink-rule bg-transparent p-5 font-serif text-lg leading-relaxed text-ink-text placeholder:text-ink-muted/60 focus:border-ink-accent focus:outline-none"
+        className="w-full resize-y rounded-sm border border-ink-rule bg-transparent p-4 sm:p-5 font-serif text-base sm:text-lg leading-relaxed text-ink-text placeholder:text-ink-muted/60 focus:border-ink-accent focus:outline-none"
       />
-      <div className="flex items-center justify-between text-xs font-sans text-ink-muted">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-sans text-ink-muted">
         <span>{content ? `${approxTokens} tokens approx.` : 'nothing yet.'}</span>
         <button
           onClick={submit}

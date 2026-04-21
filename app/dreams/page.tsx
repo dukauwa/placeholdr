@@ -4,10 +4,13 @@ import { dreamsCollection, memoriesCollection } from '@/lib/mongo';
 import type { Dream, DreamWithCitations, Memory } from '@/lib/types';
 import { DreamCard } from '@/components/DreamCard';
 import { FadeIn } from '@/components/FadeIn';
+import { DEMO_MODE, DEMO_DREAMS } from '@/lib/demo';
 
 export const dynamic = 'force-dynamic';
 
 async function loadDreams(userId: string): Promise<DreamWithCitations[]> {
+  if (DEMO_MODE) return DEMO_DREAMS;
+
   const dreams = await dreamsCollection();
   const memories = await memoriesCollection();
 
@@ -51,9 +54,9 @@ export default async function DreamsPage() {
 
   if (dreams.length === 0) {
     return (
-      <section className="mx-auto max-w-reading px-6">
+      <section className="mx-auto max-w-reading px-5 sm:px-6">
         <FadeIn>
-          <p className="font-serif italic text-xl text-ink-muted leading-relaxed">
+          <p className="font-serif italic text-lg sm:text-xl text-ink-muted leading-relaxed">
             no dreams yet. leave something in the log, or run{' '}
             <code className="font-sans text-sm not-italic text-ink-accent">pnpm dream:local</code>{' '}
             to wake the agent.
@@ -76,14 +79,14 @@ export default async function DreamsPage() {
   });
 
   return (
-    <section className="mx-auto max-w-reading px-6">
+    <section className="mx-auto max-w-reading px-5 sm:px-6">
       <FadeIn>
-        <p className="font-sans text-xs uppercase tracking-[0.2em] text-ink-muted mb-4">
+        <p className="font-sans text-[11px] sm:text-xs uppercase tracking-[0.18em] sm:tracking-[0.2em] text-ink-muted mb-3 sm:mb-4">
           the morning letter &middot; {latestDate}
         </p>
       </FadeIn>
       <FadeIn delay={100}>
-        <h1 className="font-serif italic text-4xl leading-tight text-ink-text mb-16">
+        <h1 className="font-serif italic text-[2rem] sm:text-4xl leading-tight text-ink-text mb-10 sm:mb-16">
           what we dreamt for you.
         </h1>
       </FadeIn>
