@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dreamlog": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/dreamlog-mcp.mjs"],
+      "env": {
+        "DREAMLOG_HOME": "${HOME}/.dreamlog"
+      }
+    }
+  }
+}

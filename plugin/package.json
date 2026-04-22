@@ -1,0 +1,22 @@
+{
+  "name": "dreamlog-plugin",
+  "version": "0.1.0",
+  "description": "Claude Code plugin: one small dream per day from your fragments.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18.17"
+  },
+  "bin": {
+    "dreamlog-mcp": "bin/dreamlog-mcp.mjs",
+    "dreamlog-read": "bin/dreamlog-read.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.3.0",
+    "js-tiktoken": "^1.0.19"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  }
+}

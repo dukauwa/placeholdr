@@ -1,0 +1,17 @@
+{
+  "description": "Dreamlog — nudge on first session of the day if a dream is due.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/dreamlog-check.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

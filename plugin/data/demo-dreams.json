@@ -1,0 +1,26 @@
+[
+  {
+    "type": "hypothesis",
+    "title": "the twenty-minute problem",
+    "body": "We noticed you keep arriving at the same small conviction, dressed three different ways: that the best meetings end shorter than they started, that a risotto wants ten minutes of absence for every twenty of attention, that your grandmother walked away from the pot on purpose. Maybe the shared claim is this: beyond some threshold, presence becomes interference. You have been circling a theory of when to leave a thing alone, and the evidence keeps arriving through kitchens.",
+    "seed_idx": 5,
+    "citation_idxs": [26, 11],
+    "minutes_ago": 142
+  },
+  {
+    "type": "question",
+    "title": "what were you protecting, exactly",
+    "body": "Some nights you write about the warm pull-chain bead, the kitchen that smelled of camphor, the light your grandmother kept on because someone might come home. Other nights you write about REM down twenty percent, about reaching into a pocket for keys that aren't there. The question the notes are circling, we think, is not whether you are sleeping enough. It is whether you have stopped leaving a light on for yourself.",
+    "seed_idx": 0,
+    "citation_idxs": [25],
+    "minutes_ago": 221
+  },
+  {
+    "type": "connection",
+    "title": "the woman with the persimmon knows",
+    "body": "In one fragment a woman on a train to Osaka eats a single persimmon with a small knife, very slowly, with all afternoon at her disposal. In another, you confess you keep being stuck but have realized most of your stuck is fear, not quality. These are the same fragment. She is not eating slowly. She is refusing the premise that the fruit is in the way of something else. You have been writing, for months, about wanting her trick.",
+    "seed_idx": 11,
+    "citation_idxs": [38, 17],
+    "minutes_ago": 358
+  }
+]

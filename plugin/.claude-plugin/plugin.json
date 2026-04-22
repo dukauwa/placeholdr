@@ -1,0 +1,10 @@
+{
+  "name": "dreamlog",
+  "version": "0.1.0",
+  "description": "A nocturnal agent that reads your notes and writes one small literary dream per cluster each day.",
+  "author": { "name": "dukauwa" },
+  "homepage": "https://github.com/dukauwa/placeholdr/tree/main/plugin",
+  "repository": "https://github.com/dukauwa/placeholdr",
+  "license": "MIT",
+  "keywords": ["journal", "notes", "writing", "ritual", "dreams", "reflection"]
+}
