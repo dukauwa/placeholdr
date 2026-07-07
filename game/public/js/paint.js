@@ -1,13 +1,19 @@
-// Body painting: strokes live in body space (140x220) on each player's paint
-// canvas. Ops are replayable so undo/late-sync re-render deterministically.
-import { S, BODY_W, BODY_H } from './state.js';
+// Body painting (3D): strokes live in the 256x256 texture atlas of each
+// player's figure. Ops are replayable so undo/late-sync stay deterministic.
+import { S } from './state.js';
+import { ATLAS } from './figure.js';
 
 export function applyOp(player, op) {
-  player.paint.ops.push(op);
-  drawOp(player.paint.ctx, op, player);
+  player.paintOps.push(op);
+  drawOp(player, op);
 }
 
-export function drawOp(ctx, op, player) {
+function actx(player) { return player.fig ? player.fig.actx : null; }
+function touch(player) { if (player.fig) player.fig.texture.needsUpdate = true; }
+
+export function drawOp(player, op) {
+  const ctx = actx(player);
+  if (!ctx) return;
   switch (op.t) {
     case 'stroke': {
       ctx.strokeStyle = op.color;
@@ -17,18 +23,22 @@ export function drawOp(ctx, op, player) {
       const pts = op.pts;
       ctx.moveTo(pts[0][0], pts[0][1]);
       if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.1, pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      for (let i = 1; i < pts.length; i++) {
+        // big jumps mean the brush crossed to another body part's atlas cell
+        const dx = pts[i][0] - pts[i - 1][0], dy = pts[i][1] - pts[i - 1][1];
+        if (dx * dx + dy * dy > 45 * 45) ctx.moveTo(pts[i][0], pts[i][1]);
+        else ctx.lineTo(pts[i][0], pts[i][1]);
+      }
       ctx.stroke();
       break;
     }
     case 'fill':
       ctx.fillStyle = op.color;
-      ctx.fillRect(0, 0, BODY_W, BODY_H);
+      ctx.fillRect(0, 0, ATLAS, ATLAS);
       break;
     case 'undo': {
-      // remove last stroke/fill (the undo op itself was already pushed)
-      const ops = player.paint.ops;
-      ops.pop(); // the undo marker
+      const ops = player.paintOps;
+      ops.pop(); // the undo marker itself
       for (let i = ops.length - 1; i >= 0; i--) {
         if (ops[i].t === 'stroke' || ops[i].t === 'fill') { ops.splice(i, 1); break; }
       }
@@ -36,35 +46,37 @@ export function drawOp(ctx, op, player) {
       break;
     }
     case 'clearPaint':
-      player.paint.ops.length = 0;
-      ctx.clearRect(0, 0, BODY_W, BODY_H);
+      player.paintOps.length = 0;
+      base(ctx);
       break;
   }
+  touch(player);
+}
+
+function base(ctx) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, ATLAS, ATLAS);
 }
 
 export function rerender(player) {
-  const { ctx, ops } = player.paint;
-  ctx.clearRect(0, 0, BODY_W, BODY_H);
-  for (const op of ops) if (op.t === 'stroke' || op.t === 'fill') drawOp(ctx, op, player);
+  const ctx = actx(player);
+  if (!ctx) return;
+  base(ctx);
+  for (const op of player.paintOps) {
+    if (op.t === 'stroke' || op.t === 'fill') {
+      const keep = player.paintOps;
+      player.paintOps = []; drawOp(player, op); player.paintOps = keep;
+    }
+  }
+  touch(player);
 }
 
 export function clearAllPaint() {
   for (const p of S.players.values()) {
-    p.paint.ops.length = 0;
-    p.paint.ctx.clearRect(0, 0, BODY_W, BODY_H);
+    p.paintOps.length = 0;
+    const ctx = actx(p);
+    if (ctx) { base(ctx); touch(p); }
   }
-}
-
-/**
- * Convert a world point to body space for a player, honoring facing flip.
- * Returns null if outside the body canvas box.
- */
-export function worldToBody(player, wx, wy) {
-  let bx = wx - (player.x - BODY_W / 2);
-  const by = wy - (player.y - BODY_H);
-  if (player.face === -1) bx = BODY_W - bx;
-  if (bx < -10 || bx > BODY_W + 10 || by < -10 || by > BODY_H + 10) return null;
-  return [Math.round(bx), Math.round(by)];
 }
 
 // ---- stroke batching for the network --------------------------------------
@@ -74,24 +86,30 @@ export function beginStroke(color, size) {
 }
 export function strokePoint(player, pt, sendFn) {
   if (!pending) return;
+  const prev = pending.pts[pending.pts.length - 1];
   pending.pts.push(pt);
-  // draw incrementally: just the last segment
-  const ctx = player.paint.ctx;
-  ctx.strokeStyle = pending.color; ctx.lineWidth = pending.size;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  const n = pending.pts.length;
-  ctx.beginPath();
-  const a = pending.pts[Math.max(0, n - 2)], b = pending.pts[n - 1];
-  ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0] + (n === 1 ? 0.1 : 0), b[1]);
-  ctx.stroke();
+  const ctx = actx(player);
+  if (ctx) {
+    ctx.strokeStyle = pending.color; ctx.lineWidth = pending.size;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    const a = prev || pt;
+    const jump = prev && ((pt[0] - a[0]) ** 2 + (pt[1] - a[1]) ** 2 > 45 * 45);
+    ctx.moveTo(jump ? pt[0] : a[0], jump ? pt[1] : a[1]);
+    ctx.lineTo(pt[0] + (prev ? 0 : 0.1), pt[1]);
+    ctx.stroke();
+    touch(player);
+  }
   if (pending.pts.length >= 24) flushStroke(player, sendFn, true);
 }
 export function flushStroke(player, sendFn, continueStroke = false) {
   if (!pending || pending.pts.length === 0) { if (!continueStroke) pending = null; return; }
   const op = { t: 'stroke', color: pending.color, size: pending.size, pts: pending.pts };
-  player.paint.ops.push(op);          // already drawn incrementally
+  player.paintOps.push(op);           // already drawn incrementally
   sendFn(op);
-  pending = continueStroke ? { t: 'stroke', color: pending.color, size: pending.size, pts: [pending.pts[pending.pts.length - 1]] } : null;
+  pending = continueStroke
+    ? { t: 'stroke', color: pending.color, size: pending.size, pts: [pending.pts[pending.pts.length - 1]] }
+    : null;
 }
 
 // ---- HSL color wheel -------------------------------------------------------

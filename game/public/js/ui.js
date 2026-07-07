@@ -1,6 +1,6 @@
 // DOM screens, HUD, palette panel, chat.
 import { S } from './state.js';
-import { MAPS } from './maps.js';
+import { MAPS } from './maps3d.js';
 import { drawColorWheel, wheelPick, pushRecent } from './paint.js';
 import { send } from './net.js';
 
@@ -91,11 +91,11 @@ export function updateHUD() {
 
   $('hud-hint').innerHTML = role === 'hider'
     ? (S.phase === 'prep'
-      ? '<b>F</b> palette · <b>Alt+click</b> sample color · <b>click</b> paint yourself · <b>R</b> pose · <b>G</b> fill'
+      ? '<b>F</b> palette (frees mouse) · <b>click body</b> paint · <b>Alt+click</b> sample surface · <b>R</b> pose · <b>G</b> fill · <b>Esc</b> free mouse'
       : 'Hold still. Blend. Pray. (You can still move… if you dare.)')
     : role === 'seeker'
       ? '<b>Click</b> shoot paintball · misses waste ammo · ammo regenerates slowly'
-      : 'You got tagged — spectating. Fly around with WASD.';
+      : 'You got tagged — spectating. WASD fly · Space up · C down.';
 }
 
 let toastTimer = null;

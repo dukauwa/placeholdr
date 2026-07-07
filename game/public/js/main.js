@@ -1,12 +1,17 @@
-// STICKMOUFLAGE client bootstrap + game loop.
-import { S, newPlayer, POSES } from './state.js';
-import { MAPS, solidsOf, mapSampler } from './maps.js';
-import { stepPhysics } from './physics.js';
+// STICKMOUFLAGE client bootstrap + 3D game loop.
+import { S, newPlayer } from './state.js';
+import { POSES } from './figure.js';
+import { MAPS } from './maps3d.js';
+import { stepPhysics3D } from './physics3d.js';
 import { connect, send, onMsg, onClose } from './net.js';
 import { input, initInput, on } from './input.js';
 import * as paint from './paint.js';
 import * as ui from './ui.js';
-import { canvas, resize, updateCamera, drawWorld, screenToWorld } from './render.js';
+import {
+  canvas, resize, loadWorld, getWorld, attachFigure, detachFigure,
+  setSeekerLook, drawLabel, addSplatAlongRay, updateCamera3D, render3D,
+  rayFromScreen, rayFromCenter, view, camera,
+} from './render3d.js';
 import { sfx } from './audio.js';
 
 let solids = [];
@@ -19,6 +24,12 @@ let painting = false;
 // Network handlers
 // ---------------------------------------------------------------------------
 
+function spawnPoint(role) {
+  const map = MAPS[S.mapId];
+  const [x, z] = role === 'seeker' ? map.seekerSpawn : map.hiderSpawn;
+  return [x + (Math.random() - 0.5) * 4, 0, z + (Math.random() - 0.5) * 4];
+}
+
 function syncRoom(m) {
   S.roomCode = m.code;
   S.hostId = m.hostId;
@@ -29,27 +40,39 @@ function syncRoom(m) {
     let p = S.players.get(pd.id);
     if (!p) {
       p = newPlayer(pd);
-      const map = MAPS[S.mapId];
-      p.x = p.netX = map.hiderSpawn.x + (Math.random() - 0.5) * 200;
-      p.y = p.netY = map.hiderSpawn.y;
+      [p.x, p.y, p.z] = spawnPoint(pd.role);
+      p.netX = p.x; p.netY = p.y; p.netZ = p.z;
       S.players.set(pd.id, p);
+      attachFigure(p);
+      setSeekerLook(p, pd.role === 'seeker');
     }
+    const roleChanged = p.role !== pd.role;
     p.name = pd.name; p.role = pd.role; p.tagged = pd.tagged; p.tags = pd.tags;
+    if (roleChanged) setSeekerLook(p, p.role === 'seeker');
+    drawLabel(p);
   }
-  for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
+  for (const id of [...S.players.keys()]) {
+    if (!seen.has(id)) { detachFigure(S.players.get(id)); S.players.delete(id); }
+  }
 }
 
 onMsg('joined', (m) => {
   S.myId = m.id;
-  syncRoom(m);
   S.mapId = m.settings.map;
+  const world = loadWorld(S.mapId);
+  solids = world.solids;
+  syncRoom(m);
   ui.showScreen('lobby');
   ui.renderLobby();
 });
 
 onMsg('room', (m) => {
+  if (m.settings.map !== S.mapId) {
+    S.mapId = m.settings.map;
+    const world = loadWorld(S.mapId);
+    solids = world.solids;
+  }
   syncRoom(m);
-  S.mapId = m.settings.map;
   if (m.phase === 'lobby') { S.phase = 'lobby'; ui.showScreen('lobby'); }
   if (S.phase === 'lobby' || S.phase === 'results') ui.renderLobby();
 });
@@ -60,53 +83,63 @@ onMsg('phase', (m) => {
   S.phase = m.phase;
   S.phaseEndsAt = m.endsAt;
   S.settings = m.settings;
-  S.mapId = m.settings.map;
-  solids = solidsOf(MAPS[S.mapId]);
+  if (m.settings.map !== S.mapId || !getWorld()) {
+    S.mapId = m.settings.map;
+  }
+  const world = loadWorld(S.mapId);   // fresh world each phase start clears splats
+  solids = world.solids;
+
   for (const [id, role] of Object.entries(m.roles)) {
     const p = S.players.get(id);
-    if (p) { p.role = role; p.tagged = false; p.tags = 0; }
+    if (p) {
+      p.role = role; p.tagged = false; p.tags = 0;
+      setSeekerLook(p, role === 'seeker');
+      drawLabel(p);
+      setGhostLook(p, false);
+    }
   }
   const me = S.me();
-  const map = MAPS[S.mapId];
+  // face the middle of the map when a phase begins
+  view.yaw = Math.atan2(-(0 - me.x), -(0 - me.z));
+  view.pitch = -0.2;
 
   if (m.phase === 'prep') {
     paint.clearAllPaint();
-    S.splats.length = 0;
     S.ammo = 6;
     selectedPose = 'stand';
     for (const p of S.players.values()) {
-      const spawn = p.role === 'seeker' ? map.seekerSpawn : map.hiderSpawn;
-      p.x = p.netX = spawn.x + (Math.random() - 0.5) * 220;
-      p.y = p.netY = spawn.y;
-      p.vx = p.vy = 0; p.pose = 'stand';
+      [p.x, p.y, p.z] = spawnPoint(p.role);
+      p.netX = p.x; p.netY = p.y; p.netZ = p.z;
+      p.vx = p.vy = p.vz = 0; p.pose = 'stand';
     }
     sfx.phase();
     if (me.role === 'seeker') {
+      document.exitPointerLock?.();
       ui.showScreen('blindfold');
     } else {
       ui.showScreen(null);
       ui.togglePalette(true);
-      ui.toast('Paint yourself to blend in! Alt+click samples stage colors.', 4200);
+      ui.toast('Paint yourself to match the stage! Alt+click samples any surface color.', 4200);
     }
   } else if (m.phase === 'seek') {
     sfx.phase();
     ui.showScreen(null);
     if (me.role === 'seeker') {
-      me.x = map.seekerSpawn.x; me.y = map.seekerSpawn.y;
+      [me.x, me.y, me.z] = spawnPoint('seeker');
       ui.toast('Hunt! Click to shoot paint — every miss wastes ammo.', 3600);
     } else {
       ui.togglePalette(false);
       ui.toast('Seekers are coming. Hold still…', 3000);
     }
   }
+  updateOverlays();
 });
 
 onMsg('pos', (m) => {
   const p = S.players.get(m.id);
   if (!p || m.id === S.myId) return;
-  p.netX = m.x; p.netY = m.y;
-  p.vx = m.vx; p.vy = m.vy;
-  p.pose = m.pose; p.face = m.face; p.anim = m.anim;
+  p.netX = m.x; p.netY = m.y; p.netZ = m.z; p.netRy = m.ry;
+  p.pose = m.pose; p.anim = m.anim;
 });
 
 for (const t of ['stroke', 'fill', 'undo', 'clearPaint']) {
@@ -117,8 +150,7 @@ for (const t of ['stroke', 'fill', 'undo', 'clearPaint']) {
 }
 
 onMsg('shot', (m) => {
-  S.splats.push({ x: m.x, y: m.y, color: '#e0533d', r: 26, seed: Math.random() * 10 });
-  if (S.splats.length > 120) S.splats.shift();
+  addSplatAlongRay(m.o, m.d);
   if (m.id === S.myId) S.ammo = m.ammo;
   m.hit ? sfx.tag() : sfx.splat();
 });
@@ -128,7 +160,7 @@ onMsg('noammo', () => ui.toast('Out of paint! Wait for ammo to regenerate…', 1
 onMsg('tagged', (m) => {
   const p = S.players.get(m.id);
   const by = S.players.get(m.by);
-  if (p) p.tagged = true;
+  if (p) { p.tagged = true; setGhostLook(p, true); }
   ui.toast(m.id === S.myId
     ? `You were found by ${by?.name || 'a seeker'}!`
     : `${p?.name || '?'} was found!`, 2800);
@@ -137,7 +169,7 @@ onMsg('tagged', (m) => {
 
 onMsg('converted', (m) => {
   const p = S.players.get(m.id);
-  if (p) { p.role = 'seeker'; p.tagged = false; }
+  if (p) { p.role = 'seeker'; p.tagged = false; setSeekerLook(p, true); drawLabel(p); }
   ui.toast(m.id === S.myId
     ? 'You were caught — now you seek!'
     : `${p?.name || '?'} joined the seekers!`, 2800);
@@ -145,6 +177,7 @@ onMsg('converted', (m) => {
 
 onMsg('results', (m) => {
   S.phase = 'results';
+  document.exitPointerLock?.();
   const meWon = (m.winners === 'seekers') === (S.me()?.role === 'seeker');
   meWon ? sfx.win() : sfx.lose();
   ui.showResults(m.winners, m.stats);
@@ -155,8 +188,19 @@ onMsg('chat', (m) => ui.addChat(m.name, m.msg));
 onClose(() => {
   ui.showScreen('menu');
   ui.menuError('Disconnected from server.');
+  for (const p of S.players.values()) detachFigure(p);
   S.players.clear();
 });
+
+function setGhostLook(p, ghost) {
+  if (!p.fig) return;
+  for (const mesh of p.fig.meshes) {
+    mesh.material.transparent = ghost;
+    mesh.material.opacity = ghost ? 0.2 : 1;
+    mesh.material.needsUpdate = true;
+  }
+  if (p.label) p.label.material.opacity = ghost ? 0.25 : 1;
+}
 
 // ---------------------------------------------------------------------------
 // Input wiring
@@ -176,8 +220,13 @@ on('poseSet', (i) => {
   sfx.pose();
   ui.toast(`Pose: ${selectedPose}`, 900);
 });
-on('palette', () => { if (inGame()) ui.togglePalette(); });
-on('tool', (t) => { ui.setTool(t); });
+on('palette', () => {
+  if (!inGame()) return;
+  ui.togglePalette();
+  if (S.paletteOpen) document.exitPointerLock?.();
+  updateOverlays();
+});
+on('tool', (t) => ui.setTool(t));
 on('fill', () => paintAction('fill'));
 on('undo', () => paintAction('undo'));
 on('clear', () => paintAction('clear'));
@@ -185,21 +234,49 @@ on('chat', (what) => {
   if (what === 'focus' && S.screen !== 'menu') ui.focusChat();
   if (what === 'blur') document.activeElement?.blur();
 });
-on('shoot', () => {
+
+on('look', ({ dx, dy }) => {
+  view.yaw -= dx * 0.0024;
+  view.pitch = Math.max(-1.25, Math.min(1.25, view.pitch - dy * 0.0024));
+});
+
+on('click', (e) => {
   const me = S.me();
   if (!me || !inGame()) return;
-  if (me.role === 'seeker' && S.phase === 'seek') {
-    const [wx, wy] = screenToWorld(input.mouseX, input.mouseY);
-    send({ t: 'shoot', x: wx, y: wy });
-    sfx.shoot();
+  const locked = document.pointerLockElement === canvas;
+  const seeking = me.role === 'seeker' && S.phase === 'seek';
+
+  if (seeking) {
+    if (!locked) { canvas.requestPointerLock?.(); return; }
+    if (e.button === 0) shoot();
+    return;
   }
+
+  // hider / ghost
+  if (S.paletteOpen && !locked) {
+    if (e.button === 0 && !e.altKey) { tryPaintAt(e.clientX, e.clientY); return; }
+    if (e.button === 2 || e.altKey) { trySampleAt(e.clientX, e.clientY); return; }
+  }
+  if (!locked) canvas.requestPointerLock?.();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  S.pointerLocked = document.pointerLockElement === canvas;
+  updateOverlays();
 });
 
 document.addEventListener('paint-action', (e) => paintAction(e.detail));
 
+function shoot() {
+  const rc = rayFromCenter();
+  const o = rc.ray.origin, d = rc.ray.direction;
+  send({ t: 'shoot', o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] });
+  sfx.shoot();
+}
+
 function paintAction(action) {
   const me = S.me();
-  if (!me || me.role !== 'hider' || me.tagged || !canPaint()) return;
+  if (!me || !canPaint()) return;
   if (action === 'fill') {
     const op = { t: 'fill', color: S.brushColor };
     paint.applyOp(me, op); send(op);
@@ -213,58 +290,68 @@ function paintAction(action) {
 function inGame() { return S.phase === 'prep' || S.phase === 'seek'; }
 function canPaint() {
   const me = S.me();
-  return inGame() && me && me.role === 'hider' && !me.tagged &&
-    !(S.phase === 'prep' && me.role === 'seeker');
+  return inGame() && me && me.role === 'hider' && !me.tagged;
 }
 
-// brush size via wheel
-canvas.addEventListener('wheel', (e) => {
-  if (S.me()?.role !== 'hider') return;
-  S.brushSize = Math.max(2, Math.min(36, S.brushSize - Math.sign(e.deltaY) * 2));
-  ui.setBrushSizeUI();
-  e.preventDefault();
-}, { passive: false });
-
-// painting with the mouse
-canvas.addEventListener('mousedown', (e) => {
+// convert a screen click to an atlas point on my own body
+function bodyPointAt(sx, sy) {
   const me = S.me();
-  if (!me || e.button !== 0 || !canPaint()) return;
-  const [wx, wy] = screenToWorld(e.clientX, e.clientY);
-  const eyedrop = S.tool === 'eyedrop' || e.altKey || input.rightDown;
-  if (eyedrop) { sampleAt(wx, wy); return; }
-  const pt = paint.worldToBody(me, wx, wy);
-  if (!pt) return;
+  if (!me?.fig) return null;
+  const rc = rayFromScreen(sx, sy);
+  const hits = rc.intersectObjects(me.fig.meshes, false);
+  if (!hits.length || !hits[0].uv) return null;
+  const uv = hits[0].uv;
+  return [Math.round(uv.x * 256), Math.round((1 - uv.y) * 256)];
+}
+
+function tryPaintAt(sx, sy) {
+  if (!canPaint()) return;
+  const pt = bodyPointAt(sx, sy);
+  if (!pt) { trySampleAt(sx, sy); return; }   // clicked past the body: sample
+  if (S.tool === 'eyedrop') { trySampleAt(sx, sy); return; }
   painting = true;
   paint.beginStroke(S.brushColor, S.brushSize);
-  paint.strokePoint(me, pt, send);
-});
+  paint.strokePoint(S.me(), pt, send);
+}
+
+function trySampleAt(sx, sy) {
+  const world = getWorld();
+  if (!world) return;
+  const rc = rayFromScreen(sx, sy);
+  const hits = rc.intersectObjects(world.group.children, false);
+  if (!hits.length) return;
+  ui.setColor(hits[0].object.userData.color);
+  sfx.pick();
+}
+
 canvas.addEventListener('mousemove', (e) => {
-  window.__mouseX = e.clientX; window.__mouseY = e.clientY;
-  window.__altDown = e.altKey;
   if (!painting) return;
-  const me = S.me();
-  if (!me || !canPaint()) { painting = false; return; }
-  const [wx, wy] = screenToWorld(e.clientX, e.clientY);
-  const pt = paint.worldToBody(me, wx, wy);
-  if (pt) paint.strokePoint(me, pt, send);
+  if (!canPaint()) { painting = false; return; }
+  const pt = bodyPointAt(e.clientX, e.clientY);
+  if (pt) paint.strokePoint(S.me(), pt, send);
 });
 window.addEventListener('mouseup', () => {
   if (painting) { paint.flushStroke(S.me(), send); painting = false; }
 });
-canvas.addEventListener('mousedown', (e) => {
-  if (e.button === 2) {
-    const me = S.me();
-    if (me && me.role === 'hider' && canPaint()) {
-      const [wx, wy] = screenToWorld(e.clientX, e.clientY);
-      sampleAt(wx, wy);
-    }
-  }
-});
 
-function sampleAt(wx, wy) {
-  const c = mapSampler(S.mapId)(wx, wy);
-  ui.setColor(c);
-  sfx.pick();
+// wheel: brush size when palette open, camera zoom otherwise
+canvas.addEventListener('wheel', (e) => {
+  if (S.paletteOpen) {
+    S.brushSize = Math.max(2, Math.min(36, S.brushSize - Math.sign(e.deltaY) * 2));
+    ui.setBrushSizeUI();
+  } else {
+    view.dist = Math.max(2.4, Math.min(10, view.dist + Math.sign(e.deltaY) * 0.6));
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function updateOverlays() {
+  const me = S.me();
+  const seeking = me?.role === 'seeker' && S.phase === 'seek';
+  document.getElementById('crosshair').classList.toggle('hidden', !(seeking && S.pointerLocked));
+  const showLockHint = inGame() && !S.pointerLocked && !S.paletteOpen &&
+    !(me?.role === 'seeker' && S.phase === 'prep');
+  document.getElementById('lock-hint').classList.toggle('hidden', !showLockHint);
 }
 
 // ---------------------------------------------------------------------------
@@ -275,55 +362,95 @@ let lastT = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
-  const t = now / 1000;
   const me = S.me();
 
   if (me && inGame()) {
     const isGhost = me.tagged && S.settings?.mode !== 'infection';
     const blindfolded = me.role === 'seeker' && S.phase === 'prep';
 
+    // camera-relative move direction
+    const f = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
+    const r = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const sy = Math.sin(view.yaw), cy = Math.cos(view.yaw);
+    let dirX = -sy * f + cy * r;
+    let dirZ = -cy * f - sy * r;
+    const dl = Math.hypot(dirX, dirZ);
+    if (dl > 1) { dirX /= dl; dirZ /= dl; }
+
     if (isGhost) {
-      // ghosts fly free
-      me.vx = (input.right - input.left) * 420;
-      me.vy = (input.down - input.up) * 420;
-      me.x += me.vx * dt; me.y += me.vy * dt;
-      const map = MAPS[S.mapId];
-      me.x = Math.max(0, Math.min(map.w, me.x));
-      me.y = Math.max(100, Math.min(map.h, me.y));
+      const fly = input.run ? 14 : 8;
+      me.x += dirX * fly * dt;
+      me.z += dirZ * fly * dt;
+      if (input.down) me.y -= fly * dt;
+      if (input.jumpPressed) { me.y += 2.5; input.jumpPressed = false; }
+      me.y = Math.max(0.5, Math.min(40, me.y));
+      const b = MAPS[S.mapId].bounds;
+      me.x = Math.max(-b.x, Math.min(b.x, me.x));
+      me.z = Math.max(-b.z, Math.min(b.z, me.z));
+      me.pose = 'tpose';
     } else if (!blindfolded) {
-      const before = me.jumps;
-      stepPhysics(me, input, solids, MAPS[S.mapId], dt, !painting);
-      if (me.jumps > before) sfx.jump();
-      // auto-pose from movement state, static pose when idle
-      if (me.ceiling) me.pose = 'ceiling';
-      else if (me.clinging) me.pose = 'climb';
+      stepPhysics3D(me, {
+        dirX, dirZ, run: input.run,
+        up: input.fwd, down: input.back || input.down,
+        jumpPressed: input.jumpPressed,
+      }, solids, MAPS[S.mapId].bounds, dt);
+      input.jumpPressed = false;
+
+      const moving = Math.hypot(me.vx, me.vz) > 0.5;
+      if (me.clinging) me.pose = 'climb';
       else if (!me.onGround) me.pose = 'jump';
-      else if (Math.abs(me.vx) > 10) { me.pose = 'walk'; me.walkT += dt * (input.run ? 1.5 : 1); }
+      else if (moving) { me.pose = input.run ? 'run' : 'walk'; me.walkT += dt; }
       else me.pose = me.role === 'seeker' ? 'stand' : selectedPose;
+
+      if (moving && !me.clinging) me.ry = Math.atan2(me.vx, me.vz);
+      if (me.role === 'seeker' && S.phase === 'seek') me.ry = view.yaw + Math.PI;
     }
 
-    // broadcast position ~15Hz when it changes
+    // sync my figure
+    if (me.fig) {
+      me.fig.root.position.set(me.x, me.y, me.z);
+      me.fig.root.rotation.y = me.ry;
+      me.fig.setPose(me.pose, me.walkT);
+    }
+
+    // broadcast ~15Hz on change
     if (now - lastPosSend > 66) {
-      const sig = `${me.x | 0},${me.y | 0},${me.pose},${me.face}`;
+      const sig = `${me.x.toFixed(1)},${me.y.toFixed(1)},${me.z.toFixed(1)},${me.pose},${me.ry.toFixed(1)}`;
       if (sig !== lastSent) {
-        send({ t: 'pos', x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx),
-               vy: Math.round(me.vy), pose: me.pose, face: me.face, anim: me.anim });
+        send({ t: 'pos', x: +me.x.toFixed(2), y: +me.y.toFixed(2), z: +me.z.toFixed(2),
+               ry: +me.ry.toFixed(2), pose: me.pose, anim: me.anim });
         lastSent = sig; lastPosSend = now;
       }
     }
   }
 
-  // interpolate remote players
+  // interpolate + animate remote players
   for (const p of S.players.values()) {
-    if (p.id === S.myId) continue;
-    p.x += (p.netX - p.x) * Math.min(1, dt * 12);
-    p.y += (p.netY - p.y) * Math.min(1, dt * 12);
-    if (p.pose === 'walk' || p.pose === 'climb' || p.pose === 'ceiling') p.walkT += dt;
+    if (p.id !== S.myId) {
+      const k = Math.min(1, dt * 12);
+      p.x += (p.netX - p.x) * k;
+      p.y += (p.netY - p.y) * k;
+      p.z += (p.netZ - p.z) * k;
+      let dr = p.netRy - p.ry;
+      while (dr > Math.PI) dr -= Math.PI * 2;
+      while (dr < -Math.PI) dr += Math.PI * 2;
+      p.ry += dr * k;
+      if (p.pose === 'walk' || p.pose === 'run' || p.pose === 'climb') p.walkT += dt;
+      if (p.fig) {
+        p.fig.root.position.set(p.x, p.y, p.z);
+        p.fig.root.rotation.y = p.ry;
+        p.fig.setPose(p.pose, p.walkT);
+      }
+    }
+    // hider name labels are hidden during the hunt — that IS the game
+    if (p.label) {
+      p.label.visible = !(S.phase === 'seek' && p.role === 'hider') && p.id !== S.myId;
+    }
   }
 
-  if (inGame() || S.phase === 'results') {
-    updateCamera(dt);
-    drawWorld(t);
+  if ((inGame() || S.phase === 'results') && getWorld()) {
+    updateCamera3D(dt);
+    render3D();
     ui.updateHUD();
   }
 
@@ -361,3 +488,17 @@ async function ensureConnected() {
 }
 
 requestAnimationFrame(frame);
+
+// test hooks (used by the automated e2e harness; harmless in production)
+window.__T = {
+  S, send, view, camera,
+  paintAt: tryPaintAt, sampleAt: trySampleAt,
+  endStroke: () => { if (painting) { paint.flushStroke(S.me(), send); painting = false; } },
+  shootAtWorld: (x, y, z) => {
+    const me = S.me();
+    const o = [me.x, me.y + 1.62, me.z];
+    const d = [x - o[0], y - o[1], z - o[2]];
+    send({ t: 'shoot', o, d });
+  },
+  setPose: (p) => { selectedPose = p; },
+};

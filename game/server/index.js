@@ -40,15 +40,14 @@ const DEFAULT_SETTINGS = {
   map: 'rooftop',
 };
 
-// Pose-aware hitboxes (world units, matches client stickfigure.js)
+// Pose-aware hit capsules (meters: height above feet + radius). Matches client figure.js.
 const POSE_BOX = {
-  stand:     { w: 44, h: 96 },  walk: { w: 48, h: 96 },
-  crouch:    { w: 52, h: 62 },  ball: { w: 50, h: 50 },
-  tpose:     { w: 96, h: 96 },  lie:  { w: 100, h: 34 },
-  sit:       { w: 56, h: 70 },  handstand: { w: 48, h: 96 },
-  star:      { w: 96, h: 100 }, lean: { w: 60, h: 94 },
-  climb:     { w: 46, h: 92 },  jump: { w: 52, h: 96 },
+  stand: { h: 1.8, r: 0.5 },  walk: { h: 1.8, r: 0.55 }, jump: { h: 1.8, r: 0.55 },
+  crouch: { h: 1.15, r: 0.55 }, ball: { h: 0.85, r: 0.55 },
+  tpose: { h: 1.8, r: 1.0 },  lie: { h: 0.5, r: 1.05 },
+  sit: { h: 1.25, r: 0.65 }, star: { h: 1.9, r: 1.05 }, climb: { h: 1.8, r: 0.5 },
 };
+const SHOT_RANGE = 80;
 
 const AMMO_MAX = 6;
 const AMMO_REGEN_MS = 4000;
@@ -177,7 +176,7 @@ class Room {
 
   // --- seeker shots -------------------------------------------------------
 
-  handleShoot(shooter, wx, wy) {
+  handleShoot(shooter, o, d) {
     if (this.phase !== 'seek' || shooter.role !== 'seeker') return;
     const now = Date.now();
     if (now - shooter.lastShot < SHOT_COOLDOWN_MS) return;
@@ -194,17 +193,29 @@ class Room {
     shooter.ammo--; shooter.lastShot = now;
     if (shooter.ammo === AMMO_MAX - 1) shooter.lastRegen = now;
 
-    // hit check against untagged hiders (pose-aware box, feet-anchored)
-    let hit = null;
+    // normalize ray direction
+    const dl = Math.hypot(d[0], d[1], d[2]) || 1;
+    const dir = [d[0] / dl, d[1] / dl, d[2] / dl];
+
+    // hit check: ray vs vertical capsule per untagged hider (sampled spheres)
+    let hit = null, hitT = Infinity;
     for (const p of this.players.values()) {
       if (p.role !== 'hider' || p.tagged || p.id === shooter.id) continue;
       const box = POSE_BOX[p.pose] || POSE_BOX.stand;
-      const pad = 6;
-      if (wx >= p.x - box.w / 2 - pad && wx <= p.x + box.w / 2 + pad &&
-          wy >= p.y - box.h - pad && wy <= p.y + pad) { hit = p; break; }
+      for (let i = 0; i <= 4; i++) {
+        const py = p.y + box.r * 0.5 + (box.h - box.r) * (i / 4);
+        const vx = p.x - o[0], vy = py - o[1], vz = p.z - o[2];
+        const t = vx * dir[0] + vy * dir[1] + vz * dir[2];
+        if (t < 0 || t > SHOT_RANGE || t >= hitT) continue;
+        const cx = o[0] + dir[0] * t - p.x, cy = o[1] + dir[1] * t - py, cz = o[2] + dir[2] * t - p.z;
+        if (Math.hypot(cx, cy, cz) < box.r) { hit = p; hitT = t; break; }
+      }
     }
 
-    this.broadcast({ t: 'shot', id: shooter.id, x: wx, y: wy, hit: hit ? hit.id : null, ammo: shooter.ammo });
+    this.broadcast({
+      t: 'shot', id: shooter.id, o, d: dir,
+      hit: hit ? hit.id : null, ammo: shooter.ammo,
+    });
 
     if (hit) {
       hit.tagged = true;
@@ -275,10 +286,10 @@ wss.on('connection', (ws) => {
       }
       case 'pos': {
         if (!room) return;
-        me.x = +m.x || 0; me.y = +m.y || 0;
+        me.x = +m.x || 0; me.y = +m.y || 0; me.z = +m.z || 0;
         me.pose = typeof m.pose === 'string' ? m.pose : 'stand';
-        room.broadcast({ t: 'pos', id: me.id, x: me.x, y: me.y, vx: +m.vx || 0, vy: +m.vy || 0,
-                         pose: me.pose, face: m.face === -1 ? -1 : 1, anim: String(m.anim || '').slice(0, 12) }, me.id);
+        room.broadcast({ t: 'pos', id: me.id, x: me.x, y: me.y, z: me.z, ry: +m.ry || 0,
+                         pose: me.pose, anim: String(m.anim || '').slice(0, 12) }, me.id);
         break;
       }
       case 'stroke': case 'fill': case 'undo': case 'clearPaint': {
@@ -297,7 +308,8 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'shoot': {
-        if (room) room.handleShoot(me, +m.x || 0, +m.y || 0);
+        if (!room || !Array.isArray(m.o) || !Array.isArray(m.d)) return;
+        room.handleShoot(me, m.o.map(Number), m.d.map(Number));
         break;
       }
       case 'chat': {

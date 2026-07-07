@@ -1,9 +1,9 @@
 # STICKMOUFLAGE — Design Document
 
-A web-based multiplayer hide-and-seek game where you play a **plain white stick figure**
-that paints itself to blend into the stage. Inspired by the mechanics of the viral
-Steam hit *MECCHA CHAMELEON* (June 2026, by solo dev Remorion_1224) — reimplemented
-from scratch with original code, art, name, and maps.
+A web-based **3D multiplayer** hide-and-seek game where you play a plain white
+stick figure that paints itself to blend into the stage. Inspired by the
+mechanics of the viral Steam hit *MECCHA CHAMELEON* (June 2026, solo dev
+Remorion_1224) — reimplemented from scratch with original code, art, name, and maps.
 
 ## Research summary (what the original does)
 
@@ -13,102 +13,119 @@ from scratch with original code, art, name, and maps.
 - **Painting**: a palette (F key), freehand brush, and a "spoid" (eyedropper) to sample
   stage colors. Skilled players sample two tones (lit + shadow) to match shading.
 - **Poses** (R key): break your silhouette so your body reads as part of the scene.
-- **Movement**: walk/run, jump, double-jump, cling to and climb walls and ceilings.
+- **Movement**: walk/run, jump, double-jump, cling to and climb walls.
 - **Round flow**: a prep phase where hiders paint and hide, then a timed seek phase
-  where seekers hunt (first person, no flashlight) and shoot paint to tag hiders.
+  where seekers hunt in first person (no flashlight) and shoot paint to tag hiders.
 - **Modes**: Normal (caught = eliminated), Infection (caught hiders join the seekers),
   Versus (everyone hides, then everyone seeks; most tags wins).
 - 2–10 players per lobby, host picks map/mode; 18 maps + map editor; cosmetics.
 
-## What we build (2D web version)
+## What we build
 
-A side-view 2.5D-feel platformer presentation instead of first person — it suits
-stick figures, works great on canvas, and keeps the core loop identical:
-paint yourself → pose → blend into a colorful stage → survive the seekers.
+A browser 3D game (Three.js, vendored — no CDN): third-person hiders paint their
+own 3D body by clicking on it; seekers hunt in first person and shoot paintballs.
 
 ### Roles & round flow
 
 ```
 LOBBY → PREP (hiders paint & hide, seekers see a blindfold countdown)
-      → SEEK (seekers hunt and shoot paintballs; hiders hold still... or run)
+      → SEEK (seekers hunt in first person and shoot paintballs)
       → RESULTS (scoreboard) → back to LOBBY
 ```
 
-- **Prep phase** (default 75s, host-adjustable): hiders move, pose, and paint.
-  Seekers see a blindfold screen with the map name and a countdown.
-- **Seek phase** (default 120s, host-adjustable): seekers spawn at the start and
-  shoot paintballs. Hitting a hider tags them. Every shot costs ammo; ammo refills
-  slowly, so spray-and-pray is punished. Hiders may still move and repaint — risky.
-- **Win conditions**: Seekers win if all hiders are tagged before the timer ends;
-  surviving hiders win otherwise.
+- **Prep** (default 75s, host-adjustable 20–180): hiders move, pose, and paint.
+  Seekers see a blindfold screen with a countdown.
+- **Seek** (default 120s, host-adjustable 30–300): seekers shoot paintballs
+  (server-validated rays). Hits tag hiders. Ammo (6) regenerates 1 per 4s with a
+  450ms shot cooldown — spraying is punished. Hiders may still move and repaint.
+- **Win**: seekers win if every hider is tagged before the timer; otherwise hiders win.
 
 ### Modes
 
-- **Classic** — tagged hiders become ghost spectators.
-- **Infection** — tagged hiders respawn as seekers with their own paint gun.
+- **Classic** — tagged hiders become translucent flying ghosts (spectators).
+- **Infection** — tagged hiders respawn as seekers.
 
 ### Controls (desktop)
 
-| Key | Action |
-|-----|--------|
-| A / D or ◀ ▶ | walk (hold Shift to run) |
-| W / Space | jump; press again in air = double jump |
-| S | crouch / climb down |
-| W/S at a wall | cling & climb (hold toward the wall) |
-| R / 1–8 | cycle / select pose |
-| F | toggle paint palette |
-| Left click | paint on your body (hiders) / shoot paintball (seekers) |
-| Alt or right-click | eyedropper — sample the stage color under the cursor |
-| E | eyedropper toggle |
-| [ / ] or wheel | brush size |
-| G | fill whole body with current color |
-| Z | undo last stroke |
-| X | clear all paint (back to white) |
+| Input | Action |
+|-------|--------|
+| WASD / arrows | move (camera-relative) |
+| Mouse (click to capture) | look around; Esc releases |
+| Shift | run |
+| Space | jump; again in air = double jump; on a wall = leap off |
+| push into climbable wall | cling; W/S climbs up/down |
+| R / 1–7 | cycle / select pose (stand, crouch, ball, T-pose, lie, sit, star) |
+| F | toggle palette — frees the mouse for painting |
+| Left click (palette open) | paint the clicked spot on your own body |
+| Alt+click / right-click | eyedropper — sample any surface's color |
+| Wheel | brush size (palette open) / camera zoom (closed) |
+| G / Z / X | fill body · undo · clear paint |
+| Left click (seeker, locked) | shoot paintball from the crosshair |
 | Enter | chat |
-| Tab | scoreboard |
 
 ### Painting system
 
-- Each player's body is a **body canvas** (offscreen, 120×200). Strokes are recorded
-  in body-space, applied with `source-atop` over the white stick-figure silhouette,
-  so paint never bleeds outside the body.
-- Tools: brush (3 sizes via wheel), eyedropper (samples the composited stage pixel
-  under the cursor), fill, undo (stroke stack), clear.
-- Strokes are batched (~30ms) and broadcast so everyone renders identical camo.
+- Each figure's body parts share a **256×256 canvas texture atlas**; every part
+  (head, torso, upper/lower arms, thighs, shins) owns a cell with remapped UVs.
+- Clicking the body raycasts to a mesh, reads the interpolated UV, and draws into
+  the atlas — so strokes land exactly where you clicked and wrap around limbs.
+- Tools: brush (wheel sizes), eyedropper (returns the exact flat color of any map
+  surface — matching a surface makes you nearly invisible on it), fill, undo
+  (op stack), clear.
+- Ops (`stroke`/`fill`/`undo`/`clearPaint`) are broadcast and replayed
+  deterministically on every client, so all players see identical camouflage.
 
 ### Stick figures & poses
 
-Stick figures are drawn as round-capped thick strokes (head circle + limbs) into the
-body canvas silhouette. Poses: **stand, walk, crouch, ball, T-pose, lie down, sit,
-handstand, star, lean**. Movement states (walk cycle, jump, climb) animate limbs;
-static poses freeze the silhouette for blending.
+Figures are rigged from cylinders + a sphere head with joint groups (shoulders,
+elbows, hips, knees). Static poses set joint rotations; walk/run/climb are
+procedurally animated. Movement overrides the chosen pose; standing still
+snaps back to it (that's your hiding silhouette). Pose changes also change the
+server-side hit capsule (a lying figure is short and wide, etc.).
 
 ### Maps
 
-Data-driven: rects/ellipses/gradients with `climbable` flags. Ship four:
-1. **Rooftop Sunset** — warm gradients, chimneys, billboards.
-2. **Jungle Gym** — playground colors, bars and slides (lots of climbing).
-3. **Gallery** — big abstract art blocks (brutal for seekers).
-4. **Candy Works** — stripes and pastel machinery.
+Data-driven: axis-aligned boxes and cylinders with flat colors, `climb` flags,
+and per-map sky/fog/sun. Four ship with the game:
+1. **Rooftop Sunset** — stairwell hut, AC units, billboard, water tower.
+2. **Jungle Gym** — climbing frame, slide tower, swings, tree.
+3. **Candy Works** — gumball machine, candy canes, chocolate stack, lollipops.
+4. **The Gallery** — colored "paintings", pedestals, divider walls.
+
+Flat colors are a design choice: the eyedropper returns the exact surface color,
+so a well-painted, well-posed hider truly disappears — shading from body
+curvature is the tell, exactly like the original's lit/shadow two-tone skill.
 
 ### Architecture
 
 ```
 game/
-  package.json          # dep: ws
-  server/index.js       # http static + WebSocket rooms, phases, tag authority
+  package.json          # deps: ws (server), three (vendored to public/lib)
+  server/index.js       # http static + WebSocket rooms, phases, ray-hit authority
   public/
     index.html  style.css
-    js/ main.js net.js state.js input.js physics.js maps.js
-       stickfigure.js paint.js render.js ui.js seeker.js audio.js
+    lib/three.module.js three.core.js (MIT, vendored)
+    js/ main.js net.js state.js input.js ui.js audio.js
+        maps3d.js figure.js physics3d.js render3d.js paint.js
 ```
 
-- **Server** is the authority for: room membership, roles, phase timers, tag hits
-  (validated against last-known positions), scores, mode rules. Movement and paint
-  are client-simulated and relayed (20Hz position snapshots, batched strokes).
-- **Client** renders at 60fps with interpolation for remote players.
-- No build step; plain ES modules. Node 18+, single npm dep (`ws`).
+- **Server** is authoritative for rooms, roles, phase timers, shot validation
+  (ray vs pose-aware capsules over last-known positions), ammo/cooldown, scores,
+  and mode rules. Movement and painting are client-simulated and relayed
+  (~15Hz position snapshots, batched paint ops, capped and sanitized).
+- **Client** renders at 60fps with interpolation for remote players; third-person
+  orbit camera for hiders/ghosts, first-person for seekers; pointer lock for look,
+  unlocked cursor for painting.
+- No build step; plain ES modules. Node 18+, single runtime dep (`ws`).
+
+### Testing
+
+- `scratchpad` e2e: two headless Chromium clients play a full round (create/join,
+  role split, move, sample, raycast-paint, sync check, blindfold, ray shot,
+  tag, results, lobby loop) — plus a 4-player WebSocket protocol test covering
+  infection conversion, host-only permissions, prep-shot rejection, and cooldowns.
 
 ### Out of scope (future)
 
-Map editor, cosmetics/unlocks, mobile touch controls, voice chat, matchmaking.
+Versus mode, map editor, cosmetics, mobile touch controls, voice chat,
+server-side movement validation (anti-cheat), spectator paint-replay for late joiners.
