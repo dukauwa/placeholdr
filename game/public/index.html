@@ -24,6 +24,9 @@
       <button id="btn-join" class="btn">Join room</button>
     </div>
     <p id="menu-error" class="error"></p>
+    <div class="row">
+      <button class="btn btn-show-controls">⌨ Controls</button>
+    </div>
     <details class="howto">
       <summary>How to play</summary>
       <ul>
@@ -40,8 +43,12 @@
 <!-- ===== Lobby screen ===== -->
 <div id="screen-lobby" class="screen hidden">
   <div class="panel lobby-panel">
-    <h2>Room <span id="lobby-code" class="code"></span></h2>
-    <p class="hint">Share the code with friends. 2+ players recommended (solo = paint practice).</p>
+    <div id="code-banner">
+      <div class="code-label">ROOM CODE — share with friends</div>
+      <div id="lobby-code" class="code"></div>
+      <button id="btn-copy-code" class="btn">Copy invite</button>
+    </div>
+    <p class="hint">Friends open this same site, type the code, and hit Join. 2+ players recommended (solo = paint practice).</p>
     <div class="lobby-cols">
       <div>
         <h3>Players</h3>
@@ -68,6 +75,7 @@
     </div>
     <div class="row">
       <button id="btn-start" class="btn primary">Start round</button>
+      <button class="btn btn-show-controls">⌨ Controls</button>
       <button id="btn-leave" class="btn">Leave</button>
     </div>
   </div>
@@ -104,15 +112,28 @@
     <div id="hud-phase"></div>
     <div id="hud-timer"></div>
     <div id="hud-role"></div>
+    <div id="hud-room"></div>
   </div>
   <div id="hud-ammo" class="hidden"></div>
   <div id="hud-hint"></div>
   <div id="hud-toast"></div>
 </div>
 
+<!-- ===== Controls overlay ===== -->
+<div id="screen-controls" class="screen hidden">
+  <div class="panel controls-panel">
+    <h2>⌨ Controls</h2>
+    <div id="controls-body"></div>
+    <div class="row">
+      <button id="btn-controls-close" class="btn primary">Close (H)</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Paint palette ===== -->
 <div id="palette" class="hidden">
   <div class="pal-head">Palette <span class="hint">(F to close)</span></div>
+  <div id="pal-howto"></div>
   <canvas id="pal-wheel" width="160" height="160"></canvas>
   <input type="range" id="pal-light" min="0" max="100" value="50">
   <div id="pal-current"><span id="pal-swatch"></span><span id="pal-hex">#ffffff</span></div>

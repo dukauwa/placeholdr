@@ -34,25 +34,35 @@ friends on your network (or port-forward / tunnel for remote friends).
 
 ## Controls
 
+Press **H** (or the ⌨ Controls button) in-game for the full list with
+platform-correct key names (⌥/⌃ on macOS, Alt/Ctrl elsewhere).
+
 | Input | Action |
 |-------|--------|
 | **WASD** | move (click the screen first to capture the mouse) |
 | **Mouse** | look · **Esc** releases the cursor |
-| **Shift** | run |
+| **Shift** | run · **Ctrl/C** crouch |
 | **Space** | jump · double-jump in air · leap off a wall |
-| **push into a wall** | cling to climbable surfaces, then **W/S** to climb |
+| **jump at a wall** | grab any climbable surface and hang there — paint away! |
+| **W / S** (on wall) | climb up / slide down · climbing past the top mantles the ledge |
 | **R** or **1–7** | poses: stand, crouch, ball, T-pose, lie, sit, star |
 | **F** | open the palette (frees the mouse for painting) |
-| **Left-click** | paint your body (hider, palette open) / shoot (seeker) |
-| **Alt+click** or **right-click** | eyedropper — sample any surface color |
+| **Click a surface** | eyedropper — grab the exact color under the cursor |
+| **Click your body** | paint with the current color |
+| **Space** (palette open) | quick-pick the color under the cursor |
+| **⌥/Alt+click** or **right-click** | eyedropper, always |
+| **Drag empty space** | orbit the camera around your body while painting |
 | **Mouse wheel** | brush size (palette open) / camera zoom |
 | **G** / **Z** / **X** | fill whole body · undo stroke · clear paint |
-| **Enter** | chat |
+| **Enter** | chat · **H** controls screen |
 
 ## Tips
 
-- The eyedropper returns the **exact** color of a surface — fill with it, then
-  paint the neighbouring surfaces' colors on the matching parts of your body.
+- The eyedropper returns the **exact texel** you click — on striped, checkered,
+  brick, dotted, and mosaic surfaces each spot can differ, so sample where you
+  will actually stand and repaint each body part to continue the pattern.
+- You can hang from any climbable wall indefinitely: jump at it, climb with W,
+  then open the palette and paint yourself into the wall art.
 - Your pose changes your hitbox and your silhouette. A "ball" against a crate
   or "lie" on a striped floor is much harder to read than a standing figure.
 - Body curvature still catches light differently than flat walls. Great hiders

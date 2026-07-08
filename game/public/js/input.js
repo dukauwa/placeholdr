@@ -1,13 +1,14 @@
 // Keyboard + pointer-lock mouse input.
 export const input = {
   fwd: false, back: false, left: false, right: false,
-  run: false, jumpPressed: false, down: false,
+  run: false, jumpPressed: false, down: false, crouch: false,
   mouseX: 0, mouseY: 0,
 };
 
 const listeners = {
   pose: [], poseSet: [], palette: [], tool: [], chat: [], fill: [],
   undo: [], clear: [], scoreboard: [], click: [], look: [],
+  quickpick: [], controls: [],
 };
 export function on(evt, fn) { listeners[evt].push(fn); }
 const emit = (evt, arg) => listeners[evt].forEach(fn => fn(arg));
@@ -23,8 +24,13 @@ export function initInput(canvas) {
       case 'KeyS': case 'ArrowDown': input.back = true; break;
       case 'KeyA': case 'ArrowLeft': input.left = true; break;
       case 'KeyD': case 'ArrowRight': input.right = true; break;
-      case 'Space': if (!e.repeat) input.jumpPressed = true; e.preventDefault(); break;
+      case 'Space':
+        if (!e.repeat) emit('quickpick');   // palette open → eyedrop under cursor
+        if (!e.repeat) input.jumpPressed = true;
+        e.preventDefault();
+        break;
       case 'KeyC': input.down = true; break;
+      case 'ControlLeft': case 'ControlRight': input.crouch = true; break;
       case 'ShiftLeft': case 'ShiftRight': input.run = true; break;
       case 'KeyR': if (!e.repeat) emit('pose'); break;
       case 'KeyF': if (!e.repeat) emit('palette'); break;
@@ -33,6 +39,8 @@ export function initInput(canvas) {
       case 'KeyG': if (!e.repeat) emit('fill'); break;
       case 'KeyZ': if (!e.repeat) emit('undo'); break;
       case 'KeyX': if (!e.repeat) emit('clear'); break;
+      case 'KeyH': if (!e.repeat) emit('controls'); break;
+      case 'Slash': if (!e.repeat && e.shiftKey) emit('controls'); break;   // "?"
       case 'Enter': emit('chat', 'focus'); e.preventDefault(); break;
       case 'Tab': emit('scoreboard', true); e.preventDefault(); break;
       default:
@@ -46,8 +54,8 @@ export function initInput(canvas) {
       case 'KeyS': case 'ArrowDown': input.back = false; break;
       case 'KeyA': case 'ArrowLeft': input.left = false; break;
       case 'KeyD': case 'ArrowRight': input.right = false; break;
-      case 'Space': break;
       case 'KeyC': input.down = false; break;
+      case 'ControlLeft': case 'ControlRight': input.crouch = false; break;
       case 'ShiftLeft': case 'ShiftRight': input.run = false; break;
       case 'Tab': emit('scoreboard', false); break;
     }
@@ -62,6 +70,7 @@ export function initInput(canvas) {
   canvas.addEventListener('mousedown', (e) => emit('click', e));
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('blur', () => {
-    input.fwd = input.back = input.left = input.right = input.run = input.down = false;
+    input.fwd = input.back = input.left = input.right = input.run =
+      input.down = input.crouch = false;
   });
 }

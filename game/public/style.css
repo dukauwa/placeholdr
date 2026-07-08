@@ -40,7 +40,12 @@ input, select { background: #12121c; color: #eee; border: 1px solid #3a3a55;
 .howto ul { margin: 10px 0 0 20px; display: grid; gap: 6px; }
 
 /* ---------- lobby ---------- */
-.code { color: #ffd23f; letter-spacing: 6px; font-family: monospace; font-size: 28px; }
+#code-banner { background: #26263a; border: 2px solid #ffd23f; border-radius: 12px;
+  padding: 14px 18px; text-align: center; margin-bottom: 12px; }
+.code-label { color: #ffd23f; font-size: 12px; letter-spacing: 2px; font-weight: 700; }
+.code { color: #ffd23f; letter-spacing: 14px; font-family: monospace; font-size: 52px;
+  font-weight: 900; text-indent: 14px; margin: 4px 0 8px; text-shadow: 0 3px 12px rgba(255,210,63,.35); }
+#btn-copy-code { font-size: 13px; padding: 7px 16px; }
 .lobby-cols { display: grid; grid-template-columns: 1fr 1.3fr; gap: 24px; margin: 16px 0; }
 #lobby-players { list-style: none; display: grid; gap: 6px; }
 #lobby-players li { background: #26263a; padding: 8px 12px; border-radius: 8px; }
@@ -68,6 +73,7 @@ input, select { background: #12121c; color: #eee; border: 1px solid #3a3a55;
 #hud-timer { font-size: 24px; color: #ffd23f; font-variant-numeric: tabular-nums; }
 #hud-phase { color: #9a9ab8; text-transform: uppercase; font-size: 13px; letter-spacing: 2px; }
 #hud-role.hider { color: #8fd3ff; } #hud-role.seeker { color: #ff5a4e; } #hud-role.ghost { color: #aaa; }
+#hud-room { color: #8888a8; font-size: 12px; font-family: monospace; letter-spacing: 2px; }
 #hud-ammo { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
   font-size: 22px; letter-spacing: 4px; color: #ff9a4e; background: rgba(15,15,25,.7);
   padding: 6px 16px; border-radius: 10px; }
@@ -77,10 +83,24 @@ input, select { background: #12121c; color: #eee; border: 1px solid #3a3a55;
   color: #fff; font-size: 20px; font-weight: 700; text-shadow: 0 2px 8px #000;
   transition: opacity .5s; opacity: 0; }
 
+/* ---------- controls overlay ---------- */
+#screen-controls { background: rgba(8,8,14,.82); z-index: 30; }
+.controls-panel { max-width: 640px; }
+#controls-body h3 { color: #ffd23f; margin: 14px 0 6px; font-size: 15px; }
+#controls-body table { width: 100%; border-collapse: collapse; }
+#controls-body td { padding: 4px 8px 4px 0; font-size: 14px; color: #c8c8de; vertical-align: top; }
+#controls-body td.key { width: 220px; white-space: nowrap; }
+kbd { background: #26263a; border: 1px solid #4a4a68; border-bottom-width: 3px;
+  border-radius: 6px; padding: 2px 9px; font-family: inherit; font-size: 13px;
+  font-weight: 700; color: #fff; }
+
 /* ---------- palette ---------- */
 #palette { position: fixed; left: 14px; top: 60px; z-index: 12; background: rgba(20,20,32,.92);
   border: 1px solid #3a3a55; border-radius: 12px; padding: 12px; width: 190px; }
 .pal-head { font-weight: 700; margin-bottom: 8px; }
+#pal-howto { font-size: 12px; color: #b8b8d0; background: #26263a; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 10px; line-height: 1.5; }
+#pal-howto b { color: #ffd23f; }
 #pal-wheel { border-radius: 50%; cursor: crosshair; display: block; margin: 0 auto; }
 #pal-light { width: 100%; margin: 8px 0; }
 #pal-current { display: flex; align-items: center; gap: 8px; font-family: monospace; font-size: 13px; }

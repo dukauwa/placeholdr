@@ -119,7 +119,7 @@ onMsg('phase', (m) => {
     } else {
       ui.showScreen(null);
       ui.togglePalette(true);
-      ui.toast('Paint yourself to match the stage! Alt+click samples any surface color.', 4200);
+      ui.toast('Paint yourself to match the stage! Click any surface to grab its exact color.', 4200);
     }
   } else if (m.phase === 'seek') {
     sfx.phase();
@@ -230,6 +230,14 @@ on('tool', (t) => ui.setTool(t));
 on('fill', () => paintAction('fill'));
 on('undo', () => paintAction('undo'));
 on('clear', () => paintAction('clear'));
+on('controls', () => ui.toggleControls());
+on('quickpick', () => {
+  // Space with the palette open = eyedrop whatever is under the cursor
+  if (S.paletteOpen && !document.pointerLockElement) {
+    trySampleAt(input.mouseX, input.mouseY);
+    input.jumpPressed = false;   // sampling, not jumping
+  }
+});
 on('chat', (what) => {
   if (what === 'focus' && S.screen !== 'menu') ui.focusChat();
   if (what === 'blur') document.activeElement?.blur();
@@ -239,6 +247,8 @@ on('look', ({ dx, dy }) => {
   view.yaw -= dx * 0.0024;
   view.pitch = Math.max(-1.25, Math.min(1.25, view.pitch - dy * 0.0024));
 });
+
+let orbitDrag = null;   // { x, y, moved } while dragging empty space (palette open)
 
 on('click', (e) => {
   const me = S.me();
@@ -252,10 +262,24 @@ on('click', (e) => {
     return;
   }
 
-  // hider / ghost
+  // hider / ghost with the palette open: click body = paint, click world =
+  // sample its color, drag empty space = orbit the camera
   if (S.paletteOpen && !locked) {
-    if (e.button === 0 && !e.altKey) { tryPaintAt(e.clientX, e.clientY); return; }
-    if (e.button === 2 || e.altKey) { trySampleAt(e.clientX, e.clientY); return; }
+    if (e.button === 2 || e.altKey || S.tool === 'eyedrop') {
+      trySampleAt(e.clientX, e.clientY);
+      return;
+    }
+    if (e.button === 0) {
+      const pt = bodyPointAt(e.clientX, e.clientY);
+      if (pt) {
+        painting = true;
+        paint.beginStroke(S.brushColor, S.brushSize);
+        paint.strokePoint(me, pt, send);
+      } else {
+        orbitDrag = { x: e.clientX, y: e.clientY, moved: false };
+      }
+      return;
+    }
   }
   if (!locked) canvas.requestPointerLock?.();
 });
@@ -320,17 +344,32 @@ function trySampleAt(sx, sy) {
   const rc = rayFromScreen(sx, sy);
   const hits = rc.intersectObjects(world.group.children, false);
   if (!hits.length) return;
-  ui.setColor(hits[0].object.userData.color);
+  // exact texel color under the cursor (pattern-aware)
+  ui.setColor(hits[0].object.userData.pick(hits[0].uv));
   sfx.pick();
 }
 
 canvas.addEventListener('mousemove', (e) => {
+  if (orbitDrag) {
+    const dx = e.clientX - orbitDrag.x, dy = e.clientY - orbitDrag.y;
+    orbitDrag.x = e.clientX; orbitDrag.y = e.clientY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) orbitDrag.moved = true;
+    view.yaw -= dx * 0.006;
+    view.pitch = Math.max(-1.25, Math.min(1.25, view.pitch - dy * 0.006));
+    return;
+  }
   if (!painting) return;
   if (!canPaint()) { painting = false; return; }
   const pt = bodyPointAt(e.clientX, e.clientY);
   if (pt) paint.strokePoint(S.me(), pt, send);
 });
-window.addEventListener('mouseup', () => {
+window.addEventListener('mouseup', (e) => {
+  if (orbitDrag) {
+    // a click (no drag) on the world = eyedrop that spot
+    if (!orbitDrag.moved) trySampleAt(e.clientX, e.clientY);
+    orbitDrag = null;
+    return;
+  }
   if (painting) { paint.flushStroke(S.me(), send); painting = false; }
 });
 
@@ -390,7 +429,7 @@ function frame(now) {
       me.pose = 'tpose';
     } else if (!blindfolded) {
       stepPhysics3D(me, {
-        dirX, dirZ, run: input.run,
+        dirX, dirZ, run: input.run, crouch: input.crouch || input.down,
         up: input.fwd, down: input.back || input.down,
         jumpPressed: input.jumpPressed,
       }, solids, MAPS[S.mapId].bounds, dt);
@@ -399,6 +438,7 @@ function frame(now) {
       const moving = Math.hypot(me.vx, me.vz) > 0.5;
       if (me.clinging) me.pose = 'climb';
       else if (!me.onGround) me.pose = 'jump';
+      else if ((input.crouch || input.down)) { me.pose = 'crouch'; if (moving) me.walkT += dt; }
       else if (moving) { me.pose = input.run ? 'run' : 'walk'; me.walkT += dt; }
       else me.pose = me.role === 'seeker' ? 'stand' : selectedPose;
 
@@ -476,7 +516,12 @@ ui.initLobby({
 ui.initResults({ onAgain: () => send({ t: 'again' }) });
 ui.initPalette();
 ui.initChat();
+ui.initControlsOverlay();
 ui.setColor('#e0533d');
+document.getElementById('pal-howto').innerHTML =
+  `<b>1.</b> Click any surface (or press <b>Space</b> over it) to grab its exact color<br>` +
+  `<b>2.</b> Click your body to paint it on<br>` +
+  `<b>3.</b> Drag empty space to spin the camera · ${ui.KEY.altShort}+click always samples`;
 initInput(canvas);
 resize();
 
