@@ -1,0 +1,12 @@
+# Render blueprint — deploys the STICKMOUFLAGE game server.
+# In Render: New + → Blueprint → connect this repo → Apply.
+services:
+  - type: web
+    name: stickmouflage
+    runtime: node
+    plan: free
+    rootDir: game
+    branch: claude/stick-figure-painting-game-pwe1en
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /
