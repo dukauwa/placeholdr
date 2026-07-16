@@ -4,6 +4,10 @@
 // Every entry collides; `climb: true` sides can be grabbed and climbed.
 // Units are meters, Y is up, boxes are center position + full size.
 import * as THREE from '../lib/three.module.js';
+import { GLTFLoader } from '../lib/GLTFLoader.js';
+import { MeshBVH, acceleratedRaycast } from '../lib/three-mesh-bvh.module.js';
+
+THREE.Mesh.prototype.raycast = acceleratedRaycast;   // fast raycasts everywhere
 
 function box(p, s, c, opts = {}) { return { type: 'box', p, s, c, ...opts }; }
 function cyl(p, r, h, c, opts = {}) { return { type: 'cyl', p, r, h, c, ...opts }; }
@@ -309,6 +313,234 @@ function makeTexture(tex, sizeU, sizeV) {
   return { t, sample };
 }
 
+// ---------------------------------------------------------------------------
+// Imported GLB worlds. Files live in /maps/<id>.glb (or /maps/<id>/scene.gltf,
+// the layout of a Sketchfab auto-converted download). A map only appears in
+// the lobby once its file exists on the server. CC-BY credits shown in lobby.
+// ---------------------------------------------------------------------------
+
+export const GLB_MAPS = {
+  blockville: {
+    name: 'Blockville (demo import)',
+    credit: 'Built-in demo scene (CC0, ours)',
+    sky: '#7fc4e8', fog: '#9fd4ee', sun: [30, 60, 20], ambient: 0.7,
+  },
+  medieval: {
+    name: 'Medieval Village',
+    credit: '“Modular Lowpoly Medieval Environment” by Satendra Saraswat — CC-BY via Sketchfab',
+    sky: '#a8d0e8', fog: '#b8dcee', sun: [30, 65, 25], ambient: 0.65,
+  },
+  temple: {
+    name: 'Sunrise Temple (heavy)',
+    credit: '“Sunrise Temple Environment” by Bl4ckGh0st — CC-BY via Sketchfab',
+    sky: '#f7b267', fog: '#e8a05c', sun: [45, 55, 10], ambient: 0.6, heavy: true,
+  },
+  skatepark: {
+    name: 'Undercroft Skatepark (heavy)',
+    credit: '“Southbank Undercroft Skatepark” by artfletch — CC-BY via Sketchfab',
+    sky: '#9aa4b8', fog: '#8a94a8', sun: [20, 55, 30], ambient: 0.7, heavy: true,
+  },
+};
+
+export function getMapDef(id) {
+  if (MAPS[id]) return { kind: 'boxes', ...MAPS[id] };
+  if (GLB_MAPS[id]) return { kind: 'glb', ...GLB_MAPS[id] };
+  return { kind: 'boxes', ...MAPS.rooftop };
+}
+
+// Which GLB files actually exist on the server right now?
+export async function probeGlbMaps() {
+  const avail = {};
+  await Promise.all(Object.keys(GLB_MAPS).map(async (id) => {
+    for (const url of [`maps/${id}.glb`, `maps/${id}/scene.gltf`]) {
+      try {
+        const r = await fetch(url, { method: 'HEAD' });
+        if (r.ok) { avail[id] = url; return; }
+      } catch { /* server unreachable — treat as absent */ }
+    }
+  }));
+  return avail;
+}
+
+const TARGET_SIZE = 70;      // world meters across the larger horizontal axis
+const STEP = 0.55;
+
+export function buildGlbMap(id, url) {
+  const def = GLB_MAPS[id];
+  const world = {
+    kind: 'glb', map: def, group: new THREE.Group(), solids: [], grid: null,
+    bounds: { x: 40, z: 30 }, hiderSpawn: [0, 0], seekerSpawn: [0, 0],
+    ready: false, onReady: [],
+  };
+
+  new GLTFLoader().load(url, (gltf) => {
+    const root = gltf.scene;
+    // normalize: uniform scale to a playable size, center on origin, floor at 0
+    let bb = new THREE.Box3().setFromObject(root);
+    const sizeX = bb.max.x - bb.min.x, sizeZ = bb.max.z - bb.min.z;
+    const scale = TARGET_SIZE / Math.max(sizeX, sizeZ, 0.001);
+    root.scale.setScalar(scale);
+    root.updateMatrixWorld(true);
+    bb = new THREE.Box3().setFromObject(root);
+    root.position.set(
+      -(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+    root.updateMatrixWorld(true);
+    bb = new THREE.Box3().setFromObject(root);
+
+    const meshes = [];
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      o.geometry.boundsTree = new MeshBVH(o.geometry);
+      o.userData.normalMat = new THREE.Matrix3().getNormalMatrix(o.matrixWorld);
+      o.userData.pick = makeGlbPicker(o);
+      meshes.push(o);
+    });
+
+    world.group.add(root);
+    world.bounds = {
+      x: Math.max(5, (bb.max.x - bb.min.x) / 2 - 0.5),
+      z: Math.max(5, (bb.max.z - bb.min.z) / 2 - 0.5),
+    };
+    world.grid = buildColumnGrid(meshes, bb);
+    pickSpawns(world);
+    world.ready = true;
+    world.onReady.forEach(fn => fn(world));
+  }, undefined, (err) => console.error('GLB load failed:', id, err));
+
+  return world;
+}
+
+// exact texel / vertex-color / material-color picker for an imported mesh
+const texCanvasCache = new WeakMap();
+function textureCanvas(map) {
+  if (texCanvasCache.has(map)) return texCanvasCache.get(map);
+  const img = map.image;
+  if (!img || !img.width) return null;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const entry = { ctx, w: img.width, h: img.height };
+  texCanvasCache.set(map, entry);
+  return entry;
+}
+
+function makeGlbPicker(mesh) {
+  const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  return (uv) => {
+    if (mat.map && uv) {
+      const t = textureCanvas(mat.map);
+      if (t) {
+        const u = ((uv.x * mat.map.repeat.x + mat.map.offset.x) % 1 + 1) % 1;
+        const v = ((uv.y * mat.map.repeat.y + mat.map.offset.y) % 1 + 1) % 1;
+        const py = mat.map.flipY ? (1 - v) : v;
+        const d = t.ctx.getImageData(
+          Math.min(t.w - 1, u * t.w) | 0, Math.min(t.h - 1, py * t.h) | 0, 1, 1).data;
+        return '#' + [d[0], d[1], d[2]].map(x => x.toString(16).padStart(2, '0')).join('');
+      }
+    }
+    return '#' + (mat.color ? mat.color.getHexString() : '888888');
+  };
+}
+
+/**
+ * Column-interval collision: a uniform XZ grid; each cell stores the solid
+ * vertical intervals [lo, hi] found by a single all-hits downward raycast
+ * (BVH-accelerated). Gives floors, walls, and ceilings for ANY imported mesh.
+ */
+function buildColumnGrid(meshes, bb) {
+  const w = bb.max.x - bb.min.x, d = bb.max.z - bb.min.z;
+  const cell = Math.max(0.55, Math.max(w, d) / 150);
+  const nx = Math.ceil(w / cell), nz = Math.ceil(d / cell);
+  const cols = new Array(nx * nz);
+  const ray = new THREE.Raycaster();
+  ray.firstHitOnly = false;
+  const down = new THREE.Vector3(0, -1, 0);
+  const origin = new THREE.Vector3();
+  const n = new THREE.Vector3();
+
+  for (let iz = 0; iz < nz; iz++) {
+    for (let ix = 0; ix < nx; ix++) {
+      origin.set(bb.min.x + (ix + 0.5) * cell, bb.max.y + 2, bb.min.z + (iz + 0.5) * cell);
+      ray.set(origin, down);
+      ray.far = bb.max.y - bb.min.y + 4;
+      const hits = ray.intersectObjects(meshes, false);
+      // walk hits top→down, pairing top surfaces with the next underside
+      const iv = [];
+      let curTop = null;
+      for (const h of hits) {
+        if (!h.face) continue;
+        const ny = n.copy(h.face.normal).applyMatrix3(h.object.userData.normalMat).normalize().y;
+        if (ny >= -0.05) { if (curTop === null) curTop = h.point.y; }
+        else if (curTop !== null) {
+          if (curTop - h.point.y > 0.04) iv.push(h.point.y, curTop);
+          curTop = null;
+        }
+      }
+      if (curTop !== null) iv.push(bb.min.y - 1, curTop);
+      cols[iz * nx + ix] = iv.length ? new Float32Array(iv) : null;
+    }
+  }
+
+  const colAt = (x, z) => {
+    const ix = Math.floor((x - bb.min.x) / cell), iz = Math.floor((z - bb.min.z) / cell);
+    if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) return null;
+    return cols[iz * nx + ix];
+  };
+
+  return {
+    cell, bb,
+    // highest solid top ≤ yMax (or -Infinity)
+    floorBelow(x, z, yMax) {
+      const c = colAt(x, z);
+      let best = -Infinity;
+      if (c) for (let i = 0; i < c.length; i += 2) {
+        if (c[i + 1] <= yMax + 1e-4 && c[i + 1] > best) best = c[i + 1];
+      }
+      return best;
+    },
+    // lowest solid underside ≥ yMin (or +Infinity) — ceilings
+    ceilAbove(x, z, yMin) {
+      const c = colAt(x, z);
+      let best = Infinity;
+      if (c) for (let i = 0; i < c.length; i += 2) {
+        if (c[i] >= yMin - 1e-4 && c[i] < best) best = c[i];
+      }
+      return best;
+    },
+    // any solid material within the open interval (yLo, yHi)?
+    occupied(x, z, yLo, yHi) {
+      const c = colAt(x, z);
+      if (c) for (let i = 0; i < c.length; i += 2) {
+        if (c[i] < yHi && c[i + 1] > yLo) return true;
+      }
+      return false;
+    },
+  };
+}
+
+function pickSpawns(world) {
+  // walkable = a floor below 4m with 2m of clearance above it
+  const g = world.grid;
+  const walkable = (x, z) => {
+    const f = g.floorBelow(x, z, 4);
+    return f > -Infinity && f >= -0.5 && !g.occupied(x, z, f + 0.1, f + 2.2) ? f : null;
+  };
+  const scan = (fromX) => {
+    for (let r = 0; r < world.bounds.x; r += 1.5) {
+      for (const [dx, dz] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r]]) {
+        const x = fromX + dx, z = dz;
+        if (Math.abs(x) > world.bounds.x || Math.abs(z) > world.bounds.z) continue;
+        if (walkable(x, z) !== null) return [x, z];
+      }
+    }
+    return [0, 0];
+  };
+  world.hiderSpawn = scan(0);
+  world.seekerSpawn = scan(-world.bounds.x * 0.8);
+}
+
 /**
  * Build meshes + collision solids for a map.
  * Each mesh gets userData.pick(hitUv) → exact color under the cursor.
@@ -358,5 +590,9 @@ export function buildMap(mapId) {
       });
     }
   }
-  return { map, group, solids };
+  return {
+    kind: 'boxes', map, group, solids, grid: null,
+    bounds: map.bounds, hiderSpawn: map.hiderSpawn, seekerSpawn: map.seekerSpawn,
+    ready: true, onReady: [],
+  };
 }

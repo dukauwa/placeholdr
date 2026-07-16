@@ -70,6 +70,35 @@ platform-correct key names (⌥/⌃ on macOS, Alt/Ctrl elsewhere).
 - Seekers: misses splat paint on the map, revealing where you've already
   checked. Ammo comes back 1 per 4 seconds, max 6.
 
+## Imported 3D worlds (GLB maps)
+
+The game can load whole environments from `.glb`/`.gltf` files — they get
+auto-scaled to playable size, a collision grid is raycast from the geometry
+(floors, walls, ceilings), every wall becomes climbable, spawn points are
+found automatically, and the eyedropper samples the model's actual texture
+pixels. A demo import ("Blockville") ships in `public/maps/`.
+
+Three community maps are pre-registered and appear in the lobby as soon as
+their file exists:
+
+| File to add | Map | Credit (CC-BY) |
+|---|---|---|
+| `public/maps/medieval.glb` | Medieval Village | "Modular Lowpoly Medieval Environment" by Satendra Saraswat, via Sketchfab |
+| `public/maps/temple.glb` | Sunrise Temple | "Sunrise Temple Environment" by Bl4ckGh0st, via Sketchfab |
+| `public/maps/skatepark.glb` | Undercroft Skatepark | "Southbank Undercroft Skatepark" by artfletch, via Sketchfab |
+
+To add them: log into Sketchfab (free), open the model page, click
+**Download 3D Model → glTF/GLB (autoconverted)**, and either save the `.glb`
+directly to the path above, or unzip a `.gltf` download into a folder
+(`public/maps/medieval/scene.gltf` also works). Restart the server — done.
+Credits show in the lobby; keep them there to satisfy the CC-BY license.
+Note: Temple (~2.4M triangles) and Skatepark (~1.8M) are heavy and may lag
+on older machines; the Medieval pack runs well everywhere.
+
+To register a different model, add an entry to `GLB_MAPS` in
+`public/js/maps3d.js` (name, credit, sky/sun colors) and drop the file in
+`public/maps/<id>.glb`.
+
 ## Tech
 
 - **Server**: Node 18+, single dependency (`ws`). Authoritative for rooms,
@@ -78,4 +107,8 @@ platform-correct key names (⌥/⌃ on macOS, Alt/Ctrl elsewhere).
   modules, no build step. Painting works by raycasting your click onto your
   body mesh and drawing into a shared 256×256 canvas-texture atlas; paint ops
   are replayed on every client so all players see identical camouflage.
+- **Imported worlds**: GLTFLoader + three-mesh-bvh (both vendored, MIT).
+  Collision uses a column-interval grid built from BVH-accelerated raycasts
+  over the imported meshes — floors, walls, ceilings, stairs all work, and
+  any wall can be grabbed and climbed.
 - See [DESIGN.md](DESIGN.md) for the full architecture and mechanics research.

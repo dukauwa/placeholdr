@@ -12,7 +12,9 @@ const PORT = process.env.PORT || 3000;
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
+  '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
 };
 
 const server = http.createServer((req, res) => {

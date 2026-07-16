@@ -1,8 +1,8 @@
 // STICKMOUFLAGE client bootstrap + 3D game loop.
 import { S, newPlayer } from './state.js';
 import { POSES } from './figure.js';
-import { MAPS } from './maps3d.js';
-import { stepPhysics3D } from './physics3d.js';
+import { getMapDef, probeGlbMaps } from './maps3d.js';
+import { stepPhysics3D, stepPhysicsGrid } from './physics3d.js';
 import { connect, send, onMsg, onClose } from './net.js';
 import { input, initInput, on } from './input.js';
 import * as paint from './paint.js';
@@ -14,20 +14,43 @@ import {
 } from './render3d.js';
 import { sfx } from './audio.js';
 
-let solids = [];
+let world = null;
 let selectedPose = 'stand';
 let lastPosSend = 0;
 let lastSent = '';
 let painting = false;
+
+function loadMapWorld(mapId) {
+  const def = getMapDef(mapId);
+  const glbUrl = def.kind === 'glb'
+    ? (S.glbAvail?.[mapId] || `maps/${mapId}.glb`) : null;
+  world = loadWorld(mapId, glbUrl);
+  if (def.kind === 'glb' && !world.ready) {
+    ui.toast(def.heavy
+      ? 'Loading a heavy imported map — give it a few seconds…'
+      : 'Loading imported map…', 2500);
+    world.onReady.push(() => {
+      // snap myself to a real spawn once the world has collision
+      const me = S.me();
+      if (me && (S.phase === 'prep' || S.phase === 'seek' || S.phase === 'lobby')) {
+        const [x, z] = me.role === 'seeker' ? world.seekerSpawn : world.hiderSpawn;
+        me.x = x; me.z = z; me.y = 6; me.vy = 0;   // drop onto the ground
+      }
+    });
+  }
+  return world;
+}
 
 // ---------------------------------------------------------------------------
 // Network handlers
 // ---------------------------------------------------------------------------
 
 function spawnPoint(role) {
-  const map = MAPS[S.mapId];
-  const [x, z] = role === 'seeker' ? map.seekerSpawn : map.hiderSpawn;
-  return [x + (Math.random() - 0.5) * 4, 0, z + (Math.random() - 0.5) * 4];
+  const [x, z] = world
+    ? (role === 'seeker' ? world.seekerSpawn : world.hiderSpawn)
+    : [0, 0];
+  return [x + (Math.random() - 0.5) * 4, world?.kind === 'glb' ? 6 : 0,
+          z + (Math.random() - 0.5) * 4];
 }
 
 function syncRoom(m) {
@@ -59,8 +82,7 @@ function syncRoom(m) {
 onMsg('joined', (m) => {
   S.myId = m.id;
   S.mapId = m.settings.map;
-  const world = loadWorld(S.mapId);
-  solids = world.solids;
+  loadMapWorld(S.mapId);
   syncRoom(m);
   ui.showScreen('lobby');
   ui.renderLobby();
@@ -69,8 +91,7 @@ onMsg('joined', (m) => {
 onMsg('room', (m) => {
   if (m.settings.map !== S.mapId) {
     S.mapId = m.settings.map;
-    const world = loadWorld(S.mapId);
-    solids = world.solids;
+    loadMapWorld(S.mapId);
   }
   syncRoom(m);
   if (m.phase === 'lobby') { S.phase = 'lobby'; ui.showScreen('lobby'); }
@@ -83,11 +104,10 @@ onMsg('phase', (m) => {
   S.phase = m.phase;
   S.phaseEndsAt = m.endsAt;
   S.settings = m.settings;
-  if (m.settings.map !== S.mapId || !getWorld()) {
-    S.mapId = m.settings.map;
-  }
-  const world = loadWorld(S.mapId);   // fresh world each phase start clears splats
-  solids = world.solids;
+  S.mapId = m.settings.map;
+  // fresh world each phase start clears splats; GLB worlds reload async but
+  // keep their collision once ready
+  loadMapWorld(S.mapId);
 
   for (const [id, role] of Object.entries(m.roles)) {
     const p = S.players.get(id);
@@ -339,13 +359,14 @@ function tryPaintAt(sx, sy) {
 }
 
 function trySampleAt(sx, sy) {
-  const world = getWorld();
-  if (!world) return;
+  const w = getWorld();
+  if (!w) return;
   const rc = rayFromScreen(sx, sy);
-  const hits = rc.intersectObjects(world.group.children, false);
-  if (!hits.length) return;
-  // exact texel color under the cursor (pattern-aware)
-  ui.setColor(hits[0].object.userData.pick(hits[0].uv));
+  const hits = rc.intersectObjects(w.group.children, true);
+  const hit = hits.find(h => h.object.userData.pick);
+  if (!hit) return;
+  // exact texel color under the cursor (pattern- and texture-aware)
+  ui.setColor(hit.object.userData.pick(hit.uv));
   sfx.pick();
 }
 
@@ -423,16 +444,21 @@ function frame(now) {
       if (input.down) me.y -= fly * dt;
       if (input.jumpPressed) { me.y += 2.5; input.jumpPressed = false; }
       me.y = Math.max(0.5, Math.min(40, me.y));
-      const b = MAPS[S.mapId].bounds;
+      const b = world?.bounds || { x: 40, z: 30 };
       me.x = Math.max(-b.x, Math.min(b.x, me.x));
       me.z = Math.max(-b.z, Math.min(b.z, me.z));
       me.pose = 'tpose';
-    } else if (!blindfolded) {
-      stepPhysics3D(me, {
+    } else if (!blindfolded && world) {
+      const move = {
         dirX, dirZ, run: input.run, crouch: input.crouch || input.down,
         up: input.fwd, down: input.back || input.down,
         jumpPressed: input.jumpPressed,
-      }, solids, MAPS[S.mapId].bounds, dt);
+      };
+      if (world.kind === 'glb') {
+        if (world.grid) stepPhysicsGrid(me, move, world.grid, world.bounds, dt);
+      } else {
+        stepPhysics3D(me, move, world.solids, world.bounds, dt);
+      }
       input.jumpPressed = false;
 
       const moving = Math.hypot(me.vx, me.vz) > 0.5;
@@ -525,6 +551,12 @@ document.getElementById('pal-howto').innerHTML =
 initInput(canvas);
 resize();
 
+// discover which imported GLB maps exist on this server
+probeGlbMaps().then((avail) => {
+  S.glbAvail = avail;
+  ui.refreshMapOptions();
+});
+
 let connected = false;
 async function ensureConnected() {
   if (connected) return;
@@ -536,7 +568,7 @@ requestAnimationFrame(frame);
 
 // test hooks (used by the automated e2e harness; harmless in production)
 window.__T = {
-  S, send, view, camera,
+  S, send, view, camera, getWorld,
   paintAt: tryPaintAt, sampleAt: trySampleAt,
   endStroke: () => { if (painting) { paint.flushStroke(S.me(), send); painting = false; } },
   shootAtWorld: (x, y, z) => {

@@ -116,6 +116,115 @@ function touchingWall(p, solids, h) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Column-grid physics for imported GLB worlds. Same feel as the AABB path:
+// run/jump/double-jump, grab-and-hang on ANY wall, climb, mantle, leap.
+// ---------------------------------------------------------------------------
+
+const GRID_STEP = 0.55;
+
+export function stepPhysicsGrid(p, move, grid, bounds, dt) {
+  const h = POSE_H[p.pose] || 1.8;
+  p.clingCd = Math.max(0, (p.clingCd || 0) - dt);
+
+  const speed = move.crouch ? CROUCH_SPEED : move.run ? RUN : WALK;
+  const dx = move.dirX * speed, dz = move.dirZ * speed;
+
+  // body-space blocked test at a target XZ (feet y): anything solid between
+  // step height and head height?
+  const blockedAt = (x, z, y) => grid.occupied(x, z, y + GRID_STEP, y + h * 0.92);
+
+  if (p.clinging) {
+    const wx = p.x - (p.wallNx || 0) * 0.5, wz = p.z - (p.wallNz || 0) * 0.5;
+    const wallThere = blockedAt(wx, wz, p.y - 0.3);
+    p.vx = 0; p.vz = 0;
+    if (move.jumpPressed) {                       // leap away
+      p.clinging = false;
+      p.clingCd = CLING_COOLDOWN;
+      p.leapT = 0.4;
+      p.vy = JUMP_V * 0.85;
+      p.vx = (p.wallNx || 0) * RUN * 0.8;
+      p.vz = (p.wallNz || 0) * RUN * 0.8;
+      move.jumpPressed = false;
+    } else if ((dx * (p.wallNx || 0) + dz * (p.wallNz || 0)) > 0.5) {
+      p.clinging = false;                         // deliberately moving away
+      p.clingCd = CLING_COOLDOWN * 0.5;
+    } else if (wallThere) {
+      p.vy = move.up ? CLIMB_V : (move.down || move.crouch) ? -SLIDE_V : 0;
+      p.jumps = 0;
+    } else if (move.up) {                         // past the top → mantle
+      p.clinging = false;
+      p.vy = 6.5;
+      p.vx = -(p.wallNx || 0) * 3;
+      p.vz = -(p.wallNz || 0) * 3;
+    } else {
+      p.clinging = false;
+    }
+  }
+
+  if (!p.clinging) {
+    if ((p.leapT || 0) > 0) {
+      p.leapT -= dt;
+      p.vx += dx * dt * 4;
+      p.vz += dz * dt * 4;
+    } else {
+      p.vx = dx; p.vz = dz;
+    }
+    p.vy -= GRAV * dt;
+    if (move.jumpPressed) {
+      if (p.onGround) { p.vy = JUMP_V; p.jumps = 1; }
+      else if (p.jumps < 2) { p.vy = DJUMP_V; p.jumps = 2; }
+      move.jumpPressed = false;
+    }
+  }
+
+  // --- horizontal, axis by axis; a blocked axis while airborne = wall grab
+  let hitWallX = false, hitWallZ = false;
+  const nxp = p.x + p.vx * dt;
+  if (!blockedAt(nxp, p.z, p.y)) p.x = nxp;
+  else hitWallX = Math.abs(p.vx) > 0.05;
+  const nzp = p.z + p.vz * dt;
+  if (!blockedAt(p.x, nzp, p.y)) p.z = nzp;
+  else hitWallZ = Math.abs(p.vz) > 0.05;
+
+  if ((hitWallX || hitWallZ) && !p.onGround && !p.clinging && p.clingCd <= 0) {
+    const l = Math.hypot(p.vx, p.vz) || 1;
+    p.wallNx = -(hitWallX ? p.vx : 0) / l;
+    p.wallNz = -(hitWallZ ? p.vz : 0) / l;
+    const nl = Math.hypot(p.wallNx, p.wallNz) || 1;
+    p.wallNx /= nl; p.wallNz /= nl;
+    p.clinging = true;
+    p.vy = Math.max(p.vy, 0);
+  }
+
+  // --- vertical: land on tops, bonk on undersides
+  const oldY = p.y;
+  p.y += p.vy * dt;
+  const wasGrounded = p.onGround;
+  p.onGround = false;
+  if (p.vy <= 0) {
+    const floor = grid.floorBelow(p.x, p.z, oldY + 0.06);
+    if (floor > -Infinity && p.y <= floor) {
+      p.y = floor; p.vy = 0; p.onGround = true; p.jumps = 0; p.clinging = false;
+    }
+  } else {
+    const ceil = grid.ceilAbove(p.x, p.z, oldY + h - 0.05);
+    if (ceil < Infinity && p.y + h > ceil) { p.y = ceil - h; p.vy = 0; }
+  }
+
+  // stairs/slopes: snap to nearby floor while walking
+  if (wasGrounded && !p.onGround && p.vy <= 0) {
+    const f = grid.floorBelow(p.x, p.z, p.y + GRID_STEP);
+    if (f > -Infinity && Math.abs(f - p.y) <= GRID_STEP + 0.05) {
+      p.y = f; p.vy = 0; p.onGround = true; p.jumps = 0;
+    }
+  }
+
+  p.x = Math.max(-bounds.x, Math.min(bounds.x, p.x));
+  p.z = Math.max(-bounds.z, Math.min(bounds.z, p.z));
+  if (p.y < 0) { p.y = 0; p.vy = 0; p.onGround = true; p.jumps = 0; p.clinging = false; }
+}
+
 function slide(p, solids, h, mx, my, mz) {
   p.x += mx; p.y += my; p.z += mz;
   for (const s of solids) {

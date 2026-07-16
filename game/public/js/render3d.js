@@ -1,7 +1,7 @@
 // Three.js scene: world, lights, per-player figures, cameras, splats, labels.
 import * as THREE from '../lib/three.module.js';
 import { S } from './state.js';
-import { MAPS, buildMap } from './maps3d.js';
+import { getMapDef, buildMap, buildGlbMap } from './maps3d.js';
 import { createFigure } from './figure.js';
 
 export const canvas = document.getElementById('game');
@@ -30,15 +30,25 @@ export function resize() {
 }
 window.addEventListener('resize', resize);
 
-export function loadWorld(mapId) {
+const glbCache = new Map();   // heavy imported worlds are built once, reused
+
+export function loadWorld(mapId, glbUrl = null) {
   if (world) {
     scene.remove(world.group);
-    world.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    if (world.kind !== 'glb') {   // procedural worlds are cheap to rebuild
+      world.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    }
   }
   clearSplats();
-  world = buildMap(mapId);
+  const def = getMapDef(mapId);
+  if (def.kind === 'glb' && glbUrl) {
+    if (!glbCache.has(mapId)) glbCache.set(mapId, buildGlbMap(mapId, glbUrl));
+    world = glbCache.get(mapId);
+  } else {
+    world = buildMap(mapId);
+  }
   scene.add(world.group);
-  const m = world.map;
+  const m = def;
   scene.background = new THREE.Color(m.sky);
   scene.fog = new THREE.Fog(m.fog, 60, 160);
   if (!sunLight) {
@@ -123,7 +133,7 @@ export function addSplatAlongRay(o, d, color = '#e0533d') {
   if (!world) return;
   raycaster.set(new THREE.Vector3(...o), new THREE.Vector3(...d));
   raycaster.far = 90;
-  const hits = raycaster.intersectObjects(world.group.children, false);
+  const hits = raycaster.intersectObjects(world.group.children, true);
   if (!hits.length) return;
   const h = hits[0];
   const g = new THREE.Group();

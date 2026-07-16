@@ -1,6 +1,6 @@
 // DOM screens, HUD, palette panel, chat.
 import { S } from './state.js';
-import { MAPS } from './maps3d.js';
+import { MAPS, GLB_MAPS, getMapDef } from './maps3d.js';
 import { drawColorWheel, wheelPick, pushRecent } from './paint.js';
 import { send } from './net.js';
 
@@ -99,10 +99,29 @@ export function initMenu({ onCreate, onJoin }) {
 export function menuError(msg) { $('menu-error').textContent = msg; }
 
 // ---------- lobby ----------
+export function refreshMapOptions() {
+  const mapSel = $('set-map');
+  const current = mapSel.value;
+  const opts = [
+    ...Object.entries(MAPS).map(([id, m]) => [id, m.name]),
+    ...Object.entries(GLB_MAPS)
+      .filter(([id]) => S.glbAvail && S.glbAvail[id])
+      .map(([id, m]) => [id, `📦 ${m.name}`]),
+  ];
+  mapSel.innerHTML = opts.map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+  if (opts.some(([id]) => id === current)) mapSel.value = current;
+  updateMapCredit();
+}
+
+function updateMapCredit() {
+  const def = getMapDef($('set-map').value || S.settings?.map || 'rooftop');
+  $('map-credit').textContent = def.credit || '';
+}
+
 export function initLobby({ onStart, onLeave }) {
   const mapSel = $('set-map');
-  mapSel.innerHTML = Object.entries(MAPS)
-    .map(([id, m]) => `<option value="${id}">${m.name}</option>`).join('');
+  refreshMapOptions();
+  mapSel.addEventListener('change', updateMapCredit);
   const pushSettings = () => {
     if (S.myId !== S.hostId) return;
     send({
@@ -142,6 +161,7 @@ export function renderLobby() {
     $('set-prep').value = S.settings.prepTime;
     $('set-seek').value = S.settings.seekTime;
     syncSettingLabels();
+    updateMapCredit();
   }
 }
 
