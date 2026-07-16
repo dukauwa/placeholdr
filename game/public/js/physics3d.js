@@ -178,13 +178,16 @@ export function stepPhysicsGrid(p, move, grid, bounds, dt) {
     }
   }
 
-  // --- horizontal, axis by axis; a blocked axis while airborne = wall grab
+  // --- horizontal, axis by axis; a blocked axis while airborne = wall grab.
+  // If our OWN column is blocked we're wedged inside geometry — always allow
+  // moving so the player can escape.
+  const wedged = blockedAt(p.x, p.z, p.y);
   let hitWallX = false, hitWallZ = false;
   const nxp = p.x + p.vx * dt;
-  if (!blockedAt(nxp, p.z, p.y)) p.x = nxp;
+  if (wedged || !blockedAt(nxp, p.z, p.y)) p.x = nxp;
   else hitWallX = Math.abs(p.vx) > 0.05;
   const nzp = p.z + p.vz * dt;
-  if (!blockedAt(p.x, nzp, p.y)) p.z = nzp;
+  if (wedged || !blockedAt(p.x, nzp, p.y)) p.z = nzp;
   else hitWallZ = Math.abs(p.vz) > 0.05;
 
   if ((hitWallX || hitWallZ) && !p.onGround && !p.clinging && p.clingCd <= 0) {

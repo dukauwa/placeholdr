@@ -33,8 +33,8 @@ function loadMapWorld(mapId) {
       // snap myself to a real spawn once the world has collision
       const me = S.me();
       if (me && (S.phase === 'prep' || S.phase === 'seek' || S.phase === 'lobby')) {
-        const [x, z] = me.role === 'seeker' ? world.seekerSpawn : world.hiderSpawn;
-        me.x = x; me.z = z; me.y = 6; me.vy = 0;   // drop onto the ground
+        const [x, z, fy] = me.role === 'seeker' ? world.seekerSpawn : world.hiderSpawn;
+        me.x = x; me.z = z; me.y = (fy || 0) + 0.5; me.vy = 0;
       }
     });
   }
@@ -46,11 +46,24 @@ function loadMapWorld(mapId) {
 // ---------------------------------------------------------------------------
 
 function spawnPoint(role) {
-  const [x, z] = world
+  const sp = world
     ? (role === 'seeker' ? world.seekerSpawn : world.hiderSpawn)
     : [0, 0];
-  return [x + (Math.random() - 0.5) * 4, world?.kind === 'glb' ? 6 : 0,
-          z + (Math.random() - 0.5) * 4];
+  const [sx, sz, floorY] = sp;
+  // imported worlds: only offset onto columns the collision grid approves
+  if (world?.kind === 'glb' && world.grid) {
+    const fy = floorY ?? 0;
+    for (let i = 0; i < 10; i++) {
+      const x = sx + (Math.random() - 0.5) * 3, z = sz + (Math.random() - 0.5) * 3;
+      const f = world.grid.floorBelow(x, z, fy + 2);
+      if (f > -0.6 && Math.abs(f - fy) < 1.6 &&
+          !world.grid.occupied(x, z, f + 0.15, f + 2.0)) {
+        return [x, f + 0.4, z];
+      }
+    }
+    return [sx, fy + 0.4, sz];
+  }
+  return [sx + (Math.random() - 0.5) * 4, 0, sz + (Math.random() - 0.5) * 4];
 }
 
 function syncRoom(m) {

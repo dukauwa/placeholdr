@@ -331,12 +331,12 @@ export const GLB_MAPS = {
     sky: '#a8d0e8', fog: '#b8dcee', sun: [30, 65, 25], ambient: 0.65,
   },
   temple: {
-    name: 'Sunrise Temple (heavy)',
+    name: 'Sunrise Temple',
     credit: '“Sunrise Temple Environment” by Bl4ckGh0st — CC-BY via Sketchfab',
-    sky: '#f7b267', fog: '#e8a05c', sun: [45, 55, 10], ambient: 0.6, heavy: true,
+    sky: '#f7b267', fog: '#e8a05c', sun: [45, 55, 10], ambient: 0.6,
   },
   skatepark: {
-    name: 'Undercroft Skatepark (heavy)',
+    name: 'Undercroft Skatepark',
     credit: '“Southbank Undercroft Skatepark” by artfletch — CC-BY via Sketchfab',
     sky: '#9aa4b8', fog: '#8a94a8', sun: [20, 55, 30], ambient: 0.7, heavy: true,
   },
@@ -521,24 +521,52 @@ function buildColumnGrid(meshes, bb) {
 }
 
 function pickSpawns(world) {
-  // walkable = a floor below 4m with 2m of clearance above it
+  // scan the whole map for walkable cells: a floor (any height up to 14m)
+  // with standing clearance above it
   const g = world.grid;
-  const walkable = (x, z) => {
-    const f = g.floorBelow(x, z, 4);
-    return f > -Infinity && f >= -0.5 && !g.occupied(x, z, f + 0.1, f + 2.2) ? f : null;
-  };
-  const scan = (fromX) => {
-    for (let r = 0; r < world.bounds.x; r += 1.5) {
-      for (const [dx, dz] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r]]) {
-        const x = fromX + dx, z = dz;
-        if (Math.abs(x) > world.bounds.x || Math.abs(z) > world.bounds.z) continue;
-        if (walkable(x, z) !== null) return [x, z];
-      }
+  const cells = [];
+  for (let x = -world.bounds.x + 1; x <= world.bounds.x - 1; x += 1.5) {
+    for (let z = -world.bounds.z + 1; z <= world.bounds.z - 1; z += 1.5) {
+      const f = g.floorBelow(x, z, 14);
+      if (f > -0.6 && !g.occupied(x, z, f + 0.15, f + 2.1)) cells.push([x, z, f]);
     }
-    return [0, 0];
+  }
+  if (!cells.length) {
+    world.hiderSpawn = [0, 0, 0];
+    world.seekerSpawn = [0, 0, 0];
+    return;
+  }
+  // openness: how many neighbor columns are walkable at a similar height?
+  // (finds plazas and streets; rejects enclosed pockets and rooftop nooks)
+  const key = (x, z) => `${Math.round(x / 1.5)}|${Math.round(z / 1.5)}`;
+  const byKey = new Map(cells.map(c => [key(c[0], c[1]), c]));
+  const openness = (c) => {
+    let n = 0;
+    for (const [dx, dz] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5],
+                            [1.5, 1.5], [-1.5, 1.5], [1.5, -1.5], [-1.5, -1.5]]) {
+      const nb = byKey.get(key(c[0] + dx, c[1] + dz));
+      if (nb && Math.abs(nb[2] - c[2]) < 1.2) n++;
+    }
+    return n;
   };
-  world.hiderSpawn = scan(0);
-  world.seekerSpawn = scan(-world.bounds.x * 0.8);
+  const open = cells.filter(c => openness(c) >= 6);
+  let pool = open.length ? open : cells;
+  // favor the dominant walkable plane (main plaza/street level), not a
+  // random high boulder that happens to sit near the center
+  const heights = pool.map(c => c[2]).sort((a, b) => a - b);
+  const median = heights[Math.floor(heights.length / 2)];
+  const level = pool.filter(c => Math.abs(c[2] - median) < 2);
+  if (level.length > 8) pool = level;
+  // hiders start near the middle of the playable area…
+  pool.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+  world.hiderSpawn = pool[0];
+  // …seekers as far from there as possible
+  let best = pool[0], bd = -1;
+  for (const c of pool) {
+    const d = Math.hypot(c[0] - world.hiderSpawn[0], c[1] - world.hiderSpawn[1]);
+    if (d > bd) { bd = d; best = c; }
+  }
+  world.seekerSpawn = best;
 }
 
 /**
