@@ -34,9 +34,9 @@ function limb(part, len, r, material) {
   return mesh;
 }
 
-const L = {   // skeleton dimensions (meters)
-  hipsY: 0.92, torso: 0.55, headR: 0.16,
-  uArm: 0.3, fArm: 0.28, thigh: 0.46, shin: 0.46,
+const L = {   // skeleton dimensions (meters) — small and chunky with a big head
+  hipsY: 0.58, torso: 0.34, headR: 0.19,
+  uArm: 0.2, fArm: 0.18, thigh: 0.28, shin: 0.28,
   limbR: 0.055, torsoR: 0.08,
 };
 
@@ -76,6 +76,16 @@ export function createFigure() {
   head.position.y = L.torso + L.headR + 0.03;
   hips.add(head);
 
+  // little dot eyes (not paintable — they stay visible through any camo)
+  const eyeMat = new THREE.MeshBasicMaterial({ color: '#26262e' });
+  const eyes = [];
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), eyeMat);
+    eye.position.set(sx * 0.07, 0.035, L.headR * 0.88);
+    head.add(eye);
+    eyes.push(eye);
+  }
+
   const joints = { hips };
   const meshes = [torso, head];
 
@@ -100,7 +110,7 @@ export function createFigure() {
   addLimb('hipL', hips, [-0.09, 0, 0], 'thighL', L.thigh, 'kneeL', 'shinL', L.shin);
   addLimb('hipR', hips, [0.09, 0, 0], 'thighR', L.thigh, 'kneeR', 'shinR', L.shin);
 
-  const fig = { root, joints, meshes, atlas, actx, texture };
+  const fig = { root, joints, meshes, eyes, atlas, actx, texture };
   fig.setPose = (pose, t) => applyPose(fig, pose, t);
   return fig;
 }
@@ -108,14 +118,14 @@ export function createFigure() {
 // Pose = joint Euler rotations + hips height (+ optional whole-body pitch).
 // Rotation X bends forward/back, Z splays sideways.
 const POSES3D = {
-  stand: { hipsY: 0.92, rot: { shoulderL: [0.1, 0, 0.12], shoulderR: [-0.1, 0, -0.12], elbowL: [-0.15, 0, 0], elbowR: [-0.15, 0, 0] } },
-  jump: { hipsY: 0.92, rot: { shoulderL: [0, 0, 2.6], shoulderR: [0, 0, -2.6], hipL: [-0.5, 0, 0.1], hipR: [-0.5, 0, -0.1], kneeL: [0.9, 0, 0], kneeR: [0.9, 0, 0] } },
-  crouch: { hipsY: 0.55, rot: { hipL: [-1.9, 0, 0.15], hipR: [-1.9, 0, -0.15], kneeL: [1.9, 0, 0], kneeR: [1.9, 0, 0], shoulderL: [-0.7, 0, 0.2], shoulderR: [-0.7, 0, -0.2], elbowL: [-0.9, 0, 0], elbowR: [-0.9, 0, 0], hips: [0.5, 0, 0] } },
-  ball: { hipsY: 0.5, rot: { hips: [1.35, 0, 0], hipL: [-2.6, 0, 0.12], hipR: [-2.6, 0, -0.12], kneeL: [2.65, 0, 0], kneeR: [2.65, 0, 0], shoulderL: [-1.2, 0, 0.35], shoulderR: [-1.2, 0, -0.35], elbowL: [-1.9, 0, 0], elbowR: [-1.9, 0, 0] } },
-  tpose: { hipsY: 0.92, rot: { shoulderL: [0, 0, Math.PI / 2], shoulderR: [0, 0, -Math.PI / 2] } },
-  lie: { hipsY: 0.22, rot: { hips: [-Math.PI / 2 + 0.06, 0, 0], shoulderL: [0.2, 0, 0.3], shoulderR: [0.2, 0, -0.3] } },
-  sit: { hipsY: 0.5, rot: { hipL: [-1.55, 0, 0.1], hipR: [-1.55, 0, -0.1], kneeL: [1.5, 0, 0], kneeR: [1.5, 0, 0], shoulderL: [0.5, 0, 0.15], shoulderR: [0.5, 0, -0.15] } },
-  star: { hipsY: 0.98, rot: { shoulderL: [0, 0, 2.3], shoulderR: [0, 0, -2.3], hipL: [0, 0, 0.55], hipR: [0, 0, -0.55] } },
+  stand: { hipsY: 0.58, rot: { shoulderL: [0.1, 0, 0.12], shoulderR: [-0.1, 0, -0.12], elbowL: [-0.15, 0, 0], elbowR: [-0.15, 0, 0] } },
+  jump: { hipsY: 0.58, rot: { shoulderL: [0, 0, 2.6], shoulderR: [0, 0, -2.6], hipL: [-0.5, 0, 0.1], hipR: [-0.5, 0, -0.1], kneeL: [0.9, 0, 0], kneeR: [0.9, 0, 0] } },
+  crouch: { hipsY: 0.36, rot: { hipL: [-1.9, 0, 0.15], hipR: [-1.9, 0, -0.15], kneeL: [1.9, 0, 0], kneeR: [1.9, 0, 0], shoulderL: [-0.7, 0, 0.2], shoulderR: [-0.7, 0, -0.2], elbowL: [-0.9, 0, 0], elbowR: [-0.9, 0, 0], hips: [0.5, 0, 0] } },
+  ball: { hipsY: 0.32, rot: { hips: [1.35, 0, 0], hipL: [-2.6, 0, 0.12], hipR: [-2.6, 0, -0.12], kneeL: [2.65, 0, 0], kneeR: [2.65, 0, 0], shoulderL: [-1.2, 0, 0.35], shoulderR: [-1.2, 0, -0.35], elbowL: [-1.9, 0, 0], elbowR: [-1.9, 0, 0] } },
+  tpose: { hipsY: 0.58, rot: { shoulderL: [0, 0, Math.PI / 2], shoulderR: [0, 0, -Math.PI / 2] } },
+  lie: { hipsY: 0.16, rot: { hips: [-Math.PI / 2 + 0.06, 0, 0], shoulderL: [0.2, 0, 0.3], shoulderR: [0.2, 0, -0.3] } },
+  sit: { hipsY: 0.33, rot: { hipL: [-1.55, 0, 0.1], hipR: [-1.55, 0, -0.1], kneeL: [1.5, 0, 0], kneeR: [1.5, 0, 0], shoulderL: [0.5, 0, 0.15], shoulderR: [0.5, 0, -0.15] } },
+  star: { hipsY: 0.62, rot: { shoulderL: [0, 0, 2.3], shoulderR: [0, 0, -2.3], hipL: [0, 0, 0.55], hipR: [0, 0, -0.55] } },
 };
 
 const JOINT_NAMES = ['hips', 'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'hipL', 'hipR', 'kneeL', 'kneeR'];
@@ -133,7 +143,7 @@ function applyPose(fig, pose, t = 0) {
       shoulderL: [-s * amp * 0.8, 0, 0.12], shoulderR: [s * amp * 0.8, 0, -0.12],
       elbowL: [-0.4, 0, 0], elbowR: [-0.4, 0, 0],
     });
-    fig.joints.hips.position.y = 0.92;
+    fig.joints.hips.position.y = 0.58;
     return;
   }
   if (pose === 'climb') {
@@ -145,7 +155,7 @@ function applyPose(fig, pose, t = 0) {
       hipL: [-0.8 - s * 0.4, 0, 0.1], hipR: [-0.8 + s * 0.4, 0, -0.1],
       kneeL: [1.0, 0, 0], kneeR: [1.0, 0, 0],
     });
-    fig.joints.hips.position.y = 0.92;
+    fig.joints.hips.position.y = 0.58;
     return;
   }
   const def = POSES3D[pose] || POSES3D.stand;

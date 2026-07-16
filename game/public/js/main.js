@@ -8,7 +8,7 @@ import { input, initInput, on } from './input.js';
 import * as paint from './paint.js';
 import * as ui from './ui.js';
 import {
-  canvas, resize, loadWorld, getWorld, attachFigure, detachFigure,
+  canvas, resize, loadWorld, preloadWorld, getWorld, attachFigure, detachFigure,
   setSeekerLook, drawLabel, addSplatAlongRay, updateCamera3D, render3D,
   rayFromScreen, rayFromCenter, view, camera,
 } from './render3d.js';
@@ -227,7 +227,7 @@ onClose(() => {
 
 function setGhostLook(p, ghost) {
   if (!p.fig) return;
-  for (const mesh of p.fig.meshes) {
+  for (const mesh of [...p.fig.meshes, ...(p.fig.eyes || [])]) {
     mesh.material.transparent = ghost;
     mesh.material.opacity = ghost ? 0.2 : 1;
     mesh.material.needsUpdate = true;
@@ -451,7 +451,7 @@ function frame(now) {
     if (dl > 1) { dirX /= dl; dirZ /= dl; }
 
     if (isGhost) {
-      const fly = input.run ? 14 : 8;
+      const fly = (input.run || input.runLock) ? 14 : 8;
       me.x += dirX * fly * dt;
       me.z += dirZ * fly * dt;
       if (input.down) me.y -= fly * dt;
@@ -463,7 +463,7 @@ function frame(now) {
       me.pose = 'tpose';
     } else if (!blindfolded && world) {
       const move = {
-        dirX, dirZ, run: input.run, crouch: input.crouch || input.down,
+        dirX, dirZ, run: input.run || input.runLock, crouch: input.crouch || input.down,
         up: input.fwd, down: input.back || input.down,
         jumpPressed: input.jumpPressed,
       };
@@ -478,7 +478,7 @@ function frame(now) {
       if (me.clinging) me.pose = 'climb';
       else if (!me.onGround) me.pose = 'jump';
       else if ((input.crouch || input.down)) { me.pose = 'crouch'; if (moving) me.walkT += dt; }
-      else if (moving) { me.pose = input.run ? 'run' : 'walk'; me.walkT += dt; }
+      else if (moving) { me.pose = (input.run || input.runLock) ? 'run' : 'walk'; me.walkT += dt; }
       else me.pose = me.role === 'seeker' ? 'stand' : selectedPose;
 
       if (moving && !me.clinging) me.ry = Math.atan2(me.vx, me.vz);
@@ -564,10 +564,12 @@ document.getElementById('pal-howto').innerHTML =
 initInput(canvas);
 resize();
 
-// discover which imported GLB maps exist on this server
+// discover which imported GLB maps exist, then start loading the default map
+// immediately — by the time the lobby fills up it's already built
 probeGlbMaps().then((avail) => {
   S.glbAvail = avail;
   ui.refreshMapOptions();
+  if (avail.medieval) preloadWorld('medieval', avail.medieval);
 });
 
 let connected = false;
@@ -586,7 +588,7 @@ window.__T = {
   endStroke: () => { if (painting) { paint.flushStroke(S.me(), send); painting = false; } },
   shootAtWorld: (x, y, z) => {
     const me = S.me();
-    const o = [me.x, me.y + 1.62, me.z];
+    const o = [me.x, me.y + 1.15, me.z];
     const d = [x - o[0], y - o[1], z - o[2]];
     send({ t: 'shoot', o, d });
   },

@@ -1,9 +1,10 @@
 // Keyboard + pointer-lock mouse input.
 export const input = {
   fwd: false, back: false, left: false, right: false,
-  run: false, jumpPressed: false, down: false, crouch: false,
+  run: false, runLock: false, jumpPressed: false, down: false, crouch: false,
   mouseX: 0, mouseY: 0,
 };
+let lastFwdTap = 0;
 
 const listeners = {
   pose: [], poseSet: [], palette: [], tool: [], chat: [], fill: [],
@@ -20,7 +21,14 @@ export function initInput(canvas) {
       return;
     }
     switch (e.code) {
-      case 'KeyW': case 'ArrowUp': input.fwd = true; break;
+      case 'KeyW': case 'ArrowUp':
+        if (!e.repeat && !input.fwd) {          // double-tap forward = sprint
+          const now = performance.now();
+          if (now - lastFwdTap < 280) input.runLock = true;
+          lastFwdTap = now;
+        }
+        input.fwd = true;
+        break;
       case 'KeyS': case 'ArrowDown': input.back = true; break;
       case 'KeyA': case 'ArrowLeft': input.left = true; break;
       case 'KeyD': case 'ArrowRight': input.right = true; break;
@@ -50,7 +58,7 @@ export function initInput(canvas) {
 
   window.addEventListener('keyup', (e) => {
     switch (e.code) {
-      case 'KeyW': case 'ArrowUp': input.fwd = false; break;
+      case 'KeyW': case 'ArrowUp': input.fwd = false; input.runLock = false; break;
       case 'KeyS': case 'ArrowDown': input.back = false; break;
       case 'KeyA': case 'ArrowLeft': input.left = false; break;
       case 'KeyD': case 'ArrowRight': input.right = false; break;

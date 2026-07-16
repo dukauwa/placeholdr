@@ -14,7 +14,7 @@ export const scene = new THREE.Scene();
 export const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 300);
 
 // camera orbit state (radians)
-export const view = { yaw: 0, pitch: -0.25, dist: 5.2 };
+export const view = { yaw: 0, pitch: -0.25, dist: 4.2 };
 
 let world = null;            // { map, group, solids, colors }
 let sunLight, ambLight;
@@ -31,6 +31,13 @@ export function resize() {
 window.addEventListener('resize', resize);
 
 const glbCache = new Map();   // heavy imported worlds are built once, reused
+
+// Start building an imported world before it is ever selected (e.g. the
+// moment the site opens) so entering a round is near-instant.
+export function preloadWorld(mapId, glbUrl) {
+  if (!glbCache.has(mapId)) glbCache.set(mapId, buildGlbMap(mapId, glbUrl));
+  return glbCache.get(mapId);
+}
 
 export function loadWorld(mapId, glbUrl = null) {
   if (world) {
@@ -83,8 +90,8 @@ export function attachFigure(p) {
   p.labelCtx = c.getContext('2d');
   p.labelTex = new THREE.CanvasTexture(c);
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: p.labelTex, depthTest: false }));
-  label.scale.set(2.4, 0.45, 1);
-  label.position.y = 2.25;
+  label.scale.set(1.9, 0.36, 1);
+  label.position.y = 1.72;
   p.fig.root.add(label);
   p.label = label;
   drawLabel(p);
@@ -134,8 +141,8 @@ export function addSplatAlongRay(o, d, color = '#e0533d') {
   raycaster.set(new THREE.Vector3(...o), new THREE.Vector3(...d));
   raycaster.far = 90;
   const hits = raycaster.intersectObjects(world.group.children, true);
-  if (!hits.length) return;
-  const h = hits[0];
+  const h = hits.find(x => x.face && x.object.isMesh);
+  if (!h) return;
   const g = new THREE.Group();
   for (let i = 0; i < 6; i++) {
     const r = 0.16 * (1 + Math.random());
@@ -180,14 +187,14 @@ export function updateCamera3D(dt) {
   const firstPerson = me.role === 'seeker' && S.phase === 'seek';
 
   if (firstPerson) {
-    camera.position.set(me.x, me.y + 1.62, me.z);
+    camera.position.set(me.x, me.y + 1.15, me.z);
     camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
     if (me.fig) me.fig.root.visible = false;
   } else {
     if (me.fig) me.fig.root.visible = true;
     const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
     const dist = isGhost ? 7 : view.dist;
-    camTarget.set(me.x, me.y + 1.2, me.z);
+    camTarget.set(me.x, me.y + 0.9, me.z);
     const off = new THREE.Vector3(
       Math.sin(view.yaw) * cp * dist,
       -sp * dist + 0.4,

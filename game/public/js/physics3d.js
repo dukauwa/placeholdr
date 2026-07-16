@@ -12,12 +12,12 @@ const JUMP_V = 8.8;
 const DJUMP_V = 7.4;
 const CLIMB_V = 3.2;
 const SLIDE_V = 1.6;
-const R = 0.35;                 // body radius
+const R = 0.26;                 // body radius
 const CLING_COOLDOWN = 0.35;    // seconds after leaping off before re-grabbing
 
 const POSE_H = {
-  stand: 1.8, walk: 1.8, run: 1.8, jump: 1.8, climb: 1.8,
-  crouch: 1.15, ball: 0.85, tpose: 1.8, lie: 0.5, sit: 1.25, star: 1.9,
+  stand: 1.35, walk: 1.35, run: 1.35, jump: 1.35, climb: 1.35,
+  crouch: 0.9, ball: 0.62, tpose: 1.35, lie: 0.4, sit: 0.95, star: 1.4,
 };
 
 export function stepPhysics3D(p, move, solids, bounds, dt) {

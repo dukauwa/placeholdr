@@ -320,25 +320,10 @@ function makeTexture(tex, sizeU, sizeV) {
 // ---------------------------------------------------------------------------
 
 export const GLB_MAPS = {
-  blockville: {
-    name: 'Blockville (demo import)',
-    credit: 'Built-in demo scene (CC0, ours)',
-    sky: '#7fc4e8', fog: '#9fd4ee', sun: [30, 60, 20], ambient: 0.7,
-  },
   medieval: {
     name: 'Medieval Village',
     credit: '“Modular Lowpoly Medieval Environment” by Satendra Saraswat — CC-BY via Sketchfab',
     sky: '#a8d0e8', fog: '#b8dcee', sun: [30, 65, 25], ambient: 0.65,
-  },
-  temple: {
-    name: 'Sunrise Temple',
-    credit: '“Sunrise Temple Environment” by Bl4ckGh0st — CC-BY via Sketchfab',
-    sky: '#f7b267', fog: '#e8a05c', sun: [45, 55, 10], ambient: 0.6,
-  },
-  skatepark: {
-    name: 'Undercroft Skatepark',
-    credit: '“Southbank Undercroft Skatepark” by artfletch — CC-BY via Sketchfab',
-    sky: '#9aa4b8', fog: '#8a94a8', sun: [20, 55, 30], ambient: 0.7, heavy: true,
   },
 };
 
@@ -373,7 +358,12 @@ export function buildGlbMap(id, url) {
     ready: false, onReady: [],
   };
 
-  new GLTFLoader().load(url, (gltf) => {
+  // precomputed collision (shipped next to the GLB) makes loading near-instant:
+  // no raycast sweep, and the BVH build can happen lazily in the background
+  const gridJson = fetch(`maps/${id}.grid.json`)
+    .then(r => (r.ok ? r.json() : null)).catch(() => null);
+
+  new GLTFLoader().load(url, async (gltf) => {
     const root = gltf.scene;
     // normalize: uniform scale to a playable size, center on origin, floor at 0
     let bb = new THREE.Box3().setFromObject(root);
@@ -391,19 +381,34 @@ export function buildGlbMap(id, url) {
     root.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = o.receiveShadow = true;
-      o.geometry.boundsTree = new MeshBVH(o.geometry);
       o.userData.normalMat = new THREE.Matrix3().getNormalMatrix(o.matrixWorld);
       o.userData.pick = makeGlbPicker(o);
       meshes.push(o);
     });
-
     world.group.add(root);
     world.bounds = {
       x: Math.max(5, (bb.max.x - bb.min.x) / 2 - 0.5),
       z: Math.max(5, (bb.max.z - bb.min.z) / 2 - 0.5),
     };
-    world.grid = buildColumnGrid(meshes, bb);
-    pickSpawns(world);
+
+    const pre = await gridJson;
+    if (pre) {
+      world.grid = gridFromData(pre.grid);
+      world.bounds = pre.bounds;
+      world.hiderSpawn = pre.hiderSpawn;
+      world.seekerSpawn = pre.seekerSpawn;
+      // BVH only accelerates runtime raycasts (eyedropper/splats) — build it
+      // in the background after the map is already playable
+      setTimeout(() => {
+        for (const m of meshes) {
+          if (!m.geometry.boundsTree) m.geometry.boundsTree = new MeshBVH(m.geometry);
+        }
+      }, 400);
+    } else {
+      for (const m of meshes) m.geometry.boundsTree = new MeshBVH(m.geometry);
+      world.grid = buildColumnGrid(meshes, bb);
+      pickSpawns(world);
+    }
     world.ready = true;
     world.onReady.forEach(fn => fn(world));
   }, undefined, (err) => console.error('GLB load failed:', id, err));
@@ -483,14 +488,27 @@ function buildColumnGrid(meshes, bb) {
     }
   }
 
+  return gridFromData({
+    cell, nx, nz,
+    minX: bb.min.x, minZ: bb.min.z,
+    cols: cols.map(c => (c ? [...c].map(v => Math.round(v * 100) / 100) : 0)),
+  });
+}
+
+// Reconstruct a grid (same API) from plain serializable data.
+export function gridFromData(data) {
+  const { cell, nx, nz, minX, minZ } = data;
+  const cols = data.cols.map(c => (c ? Float32Array.from(c) : null));
+
   const colAt = (x, z) => {
-    const ix = Math.floor((x - bb.min.x) / cell), iz = Math.floor((z - bb.min.z) / cell);
+    const ix = Math.floor((x - minX) / cell), iz = Math.floor((z - minZ) / cell);
     if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) return null;
     return cols[iz * nx + ix];
   };
 
   return {
-    cell, bb,
+    data,
+    cell,
     // highest solid top ≤ yMax (or -Infinity)
     floorBelow(x, z, yMax) {
       const c = colAt(x, z);

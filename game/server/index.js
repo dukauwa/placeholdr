@@ -24,7 +24,15 @@ const server = http.createServer((req, res) => {
   if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end(); }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
+    const ext = path.extname(filePath);
+    // big immutable-ish assets cache hard; code stays fresh
+    const cache = (urlPath.startsWith('/maps/') || urlPath.startsWith('/lib/'))
+      ? 'public, max-age=86400'
+      : 'no-cache';
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': cache,
+    });
     res.end(data);
   });
 });
@@ -39,15 +47,16 @@ const DEFAULT_SETTINGS = {
   mode: 'classic',       // 'classic' | 'infection'
   prepTime: 75,          // seconds
   seekTime: 120,         // seconds
-  map: 'rooftop',
+  map: 'medieval',
 };
 
 // Pose-aware hit capsules (meters: height above feet + radius). Matches client figure.js.
 const POSE_BOX = {
-  stand: { h: 1.8, r: 0.5 },  walk: { h: 1.8, r: 0.55 }, jump: { h: 1.8, r: 0.55 },
-  crouch: { h: 1.15, r: 0.55 }, ball: { h: 0.85, r: 0.55 },
-  tpose: { h: 1.8, r: 1.0 },  lie: { h: 0.5, r: 1.05 },
-  sit: { h: 1.25, r: 0.65 }, star: { h: 1.9, r: 1.05 }, climb: { h: 1.8, r: 0.5 },
+  stand: { h: 1.35, r: 0.4 },  walk: { h: 1.35, r: 0.42 }, run: { h: 1.35, r: 0.42 },
+  jump: { h: 1.35, r: 0.42 },
+  crouch: { h: 0.9, r: 0.42 }, ball: { h: 0.62, r: 0.42 },
+  tpose: { h: 1.35, r: 0.72 },  lie: { h: 0.4, r: 0.78 },
+  sit: { h: 0.95, r: 0.5 }, star: { h: 1.4, r: 0.78 }, climb: { h: 1.35, r: 0.4 },
 };
 const SHOT_RANGE = 80;
 

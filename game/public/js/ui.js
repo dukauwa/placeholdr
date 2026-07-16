@@ -20,7 +20,7 @@ const CONTROLS = () => [
   ['Movement', [
     ['W A S D / arrows', 'Move (click the game first to capture the mouse)'],
     ['Mouse', 'Look around — Esc releases the cursor'],
-    [KEY.shift, 'Run'],
+    [KEY.shift + ' or double-tap W', 'Run'],
     ['Space', 'Jump · press again in air to double-jump'],
     [KEY.ctrl + ' or C', 'Crouch (slower, smaller)'],
   ]],
@@ -102,12 +102,8 @@ export function menuError(msg) { $('menu-error').textContent = msg; }
 export function refreshMapOptions() {
   const mapSel = $('set-map');
   const current = mapSel.value;
-  const opts = [
-    ...Object.entries(MAPS).map(([id, m]) => [id, m.name]),
-    ...Object.entries(GLB_MAPS)
-      .filter(([id]) => S.glbAvail && S.glbAvail[id])
-      .map(([id, m]) => [id, `📦 ${m.name}`]),
-  ];
+  // only imported worlds are playable right now (medieval village)
+  const opts = Object.entries(GLB_MAPS).map(([id, m]) => [id, m.name]);
   mapSel.innerHTML = opts.map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
   if (opts.some(([id]) => id === current)) mapSel.value = current;
   updateMapCredit();
