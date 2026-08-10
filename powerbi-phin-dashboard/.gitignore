@@ -1,0 +1,7 @@
+# PHIN source workbooks and generated outputs stay local
+data/raw/*
+!data/raw/README.md
+data/processed/*
+!data/processed/.gitkeep
+*.pbix
+__pycache__/

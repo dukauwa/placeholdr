@@ -1,0 +1,120 @@
+// PHIN dashboard measures
+// -----------------------------------------------------------------
+// Paste each block into Power BI (Modeling > New measure), or load the
+// whole file with Tabular Editor. Home table suggestion in brackets.
+// Table names assume FactAdverseEvents, FactNeverEvents, FactInfections,
+// FactPatientFeedback, DimHospital, DimPeriod. Column names are identical in
+// both pipelines; if you import the Python CSVs, just rename each table on
+// import (fact_adverse_events -> FactAdverseEvents, etc.).
+// Rates are recomputed from raw counts so they stay correct under any
+// slicer selection — never average a pre-computed rate column.
+
+// ----- Patient safety: adverse events [FactAdverseEvents] -----
+
+Adverse Events =
+SUM ( FactAdverseEvents[AdverseEvents] )
+
+Episodes =
+SUM ( FactAdverseEvents[Episodes] )
+
+Adverse Events per 1,000 Episodes =
+DIVIDE ( [Adverse Events], [Episodes] ) * 1000
+
+Hospitals Reporting Adverse Events =
+CALCULATE (
+    DISTINCTCOUNT ( FactAdverseEvents[Hospital] ),
+    FactAdverseEvents[AdverseEvents] > 0
+)
+
+// ----- Patient safety: never events [FactNeverEvents] -----
+
+Never Events =
+SUM ( FactNeverEvents[NeverEvents] )
+
+Hospitals with a Never Event =
+CALCULATE (
+    DISTINCTCOUNT ( FactNeverEvents[Hospital] ),
+    FactNeverEvents[NeverEvents] > 0
+)
+
+Never Event-Free Hospitals % =
+VAR AllHospitals = DISTINCTCOUNT ( DimHospital[Hospital] )
+RETURN
+    DIVIDE ( AllHospitals - [Hospitals with a Never Event], AllHospitals )
+
+// ----- Infections [FactInfections] -----
+
+Infections =
+SUM ( FactInfections[Infections] )
+
+Bed Days =
+// Bed days repeat per infection-type row after the unpivot; sum one
+// value per hospital+period, not per row.
+SUMX (
+    SUMMARIZE ( FactInfections, FactInfections[Hospital], FactInfections[Period], FactInfections[BedDays] ),
+    FactInfections[BedDays]
+)
+
+HCAI Rate per 100k Bed Days =
+DIVIDE ( [Infections], [Bed Days] ) * 100000
+
+// ----- Patient feedback [FactPatientFeedback] -----
+
+Feedback Responses =
+SUM ( FactPatientFeedback[Responses] )
+
+% Would Recommend =
+// Response-weighted, so provider/region aggregates are correct.
+// If PHIN publishes PctRecommend as 0-100 rather than 0-1, the *100
+// in the format string below is already handled — format as percentage
+// only when the source is 0-1.
+DIVIDE (
+    SUMX ( FactPatientFeedback, FactPatientFeedback[Responses] * FactPatientFeedback[PctRecommend] ),
+    SUMX ( FILTER ( FactPatientFeedback, NOT ISBLANK ( FactPatientFeedback[PctRecommend] ) ),
+           FactPatientFeedback[Responses] )
+)
+
+Average Rating =
+DIVIDE (
+    SUMX ( FactPatientFeedback, FactPatientFeedback[Responses] * FactPatientFeedback[AvgRating] ),
+    SUMX ( FILTER ( FactPatientFeedback, NOT ISBLANK ( FactPatientFeedback[AvgRating] ) ),
+           FactPatientFeedback[Responses] )
+)
+
+// ----- Cross-measure / data quality -----
+
+Hospitals in Scope =
+DISTINCTCOUNT ( DimHospital[Hospital] )
+
+Hospitals Reporting All Four Measures =
+COUNTROWS (
+    FILTER (
+        VALUES ( DimHospital[Hospital] ),
+        NOT ISEMPTY ( RELATEDTABLE ( FactAdverseEvents ) )
+            && NOT ISEMPTY ( RELATEDTABLE ( FactNeverEvents ) )
+            && NOT ISEMPTY ( RELATEDTABLE ( FactInfections ) )
+            && NOT ISEMPTY ( RELATEDTABLE ( FactPatientFeedback ) )
+    )
+)
+
+// ----- Period comparison (works once two or more data drops are loaded) -----
+
+Infections Previous Period =
+VAR CurrentPeriod = SELECTEDVALUE ( DimPeriod[PeriodOrder] )
+RETURN
+    CALCULATE (
+        [Infections],
+        REMOVEFILTERS ( DimPeriod ),
+        DimPeriod[PeriodOrder] = CurrentPeriod - 1
+    )
+
+HCAI Rate Change vs Previous =
+VAR CurrentPeriod = SELECTEDVALUE ( DimPeriod[PeriodOrder] )
+VAR PrevRate =
+    CALCULATE (
+        [HCAI Rate per 100k Bed Days],
+        REMOVEFILTERS ( DimPeriod ),
+        DimPeriod[PeriodOrder] = CurrentPeriod - 1
+    )
+RETURN
+    [HCAI Rate per 100k Bed Days] - PrevRate
